@@ -569,6 +569,8 @@ static void rx_queue_notify(seL4_Word badge, void *cookie)
         vq_flags_t flag;
         while (virtqueue_gather_used(&state->rx_virtqueue, &handle, &buf, &len, &flag)) {
             ethernet_buffer_t *buffer = state->rx_queue_data[index];
+            assert(!buffer->allocated);
+            buffer->allocated = true;
             state->rx_queue_data[index] = NULL;
             struct pbuf *p = create_interface_buffer(state, buffer, len);
 
