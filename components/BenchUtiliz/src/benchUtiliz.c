@@ -29,8 +29,13 @@ char *counter_names[] = {
     "L1 i-tlb misses",
     "L1 d-tlb misses",
     "Instructions",
-    "Branch mispredictions",
+    // "Branch mispredictions",
     "Memory accesses",
+    /*"L1 i-cache misses",
+    "L1 d-cache misses",
+    "L2 i-cache refills",
+    "L2 d-cache refills",
+    "Instructions",*/
     /*
     "Resource stalls any",
     "Resource stalls reservation station",
@@ -45,8 +50,14 @@ event_id_t benchmarking_events[] = {
     SEL4BENCH_EVENT_TLB_L1I_MISS,
     SEL4BENCH_EVENT_TLB_L1D_MISS,
     SEL4BENCH_EVENT_EXECUTE_INSTRUCTION,
-    SEL4BENCH_EVENT_BRANCH_MISPREDICT,
+    //SEL4BENCH_EVENT_BRANCH_MISPREDICT,
     SEL4BENCH_EVENT_MEMORY_ACCESS,
+    /*SEL4BENCH_EVENT_CACHE_L1I_MISS,
+    SEL4BENCH_EVENT_CACHE_L1D_MISS,
+    SEL4BENCH_EVENT_L2I_CACHE_REFILL,
+    SEL4BENCH_EVENT_L2D_CACHE_REFILL,
+    SEL4BENCH_EVENT_EXECUTE_INSTRUCTION,*/
+
     /*
     SEL4BENCH_IA32_HASWELL_EVENT_RESOURCE_STALLS_ANY,
     SEL4BENCH_IA32_HASWELL_EVENT_RESOURCE_STALLS_RS,
@@ -107,7 +118,8 @@ void idle_start(void)
         sel4bench_start_counters(benchmark_bf);
         trace_start_emit();
 #ifdef CONFIG_BENCHMARK_TRACK_UTILISATION
-        seL4_BenchmarkResetAllThreadsUtilisation();
+        seL4_BenchmarkResetThreadUtilisation(camkes_get_tls()->tcb_cap);
+        //seL4_BenchmarkResetAllThreadsUtilisation();
         seL4_BenchmarkResetLog();
 #endif
         start = (uint64_t)sel4bench_get_cycle_count();
@@ -150,7 +162,7 @@ void idle_stop(uint64_t *total_ret, uint64_t *kernel_ret, uint64_t *idle_ret)
 
     seL4_BenchmarkGetThreadUtilisation(camkes_get_tls()->tcb_cap);
     uint64_t *buffer = (uint64_t *)&seL4_GetIPCBuffer()->msg[0];
-    seL4_BenchmarkDumpAllThreadsUtilisation();
+    // seL4_BenchmarkDumpAllThreadsUtilisation();
     *kernel_ret = buffer[BENCHMARK_TOTAL_KERNEL_UTILISATION];
 #else
     *kernel_ret = 0;
