@@ -157,13 +157,17 @@ void idle_stop(uint64_t *total_ret, uint64_t *kernel_ret, uint64_t *idle_ret)
 #ifdef CONFIG_BENCHMARK_TRACK_UTILISATION
     seL4_BenchmarkFinalizeLog();
     //num_entries = seL4_BenchmarkFinalizeLog();
-    //ZF_LOGE("num_entries = %lu", num_entries);
+    //printf("num_entries = %lu", num_entries);
     //print_pcs(num_entries);
 
     seL4_BenchmarkGetThreadUtilisation(camkes_get_tls()->tcb_cap);
     uint64_t *buffer = (uint64_t *)&seL4_GetIPCBuffer()->msg[0];
-    // seL4_BenchmarkDumpAllThreadsUtilisation();
+    //seL4_BenchmarkDumpAllThreadsUtilisation();
     *kernel_ret = buffer[BENCHMARK_TOTAL_KERNEL_UTILISATION];
+    printf("Total Kernel cycles: %"PRIu64"\n", buffer[BENCHMARK_TOTAL_KERNEL_UTILISATION]);
+    printf("Total Kernel entries: %"PRIu64"\n", buffer[BENCHMARK_TOTAL_NUMBER_KERNEL_ENTRIES]);
+    printf("This Idle thread kernel cycles: %"PRIu64"\n", buffer[BENCHMARK_TCB_KERNEL_UTILISATION]);
+    printf("This Idle thread kernel entries: %"PRIu64"\n", buffer[BENCHMARK_TCB_NUMBER_KERNEL_ENTRIES]); 
 #else
     *kernel_ret = 0;
 #endif
