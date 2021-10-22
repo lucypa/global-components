@@ -99,12 +99,14 @@ static inline ethernet_buffer_t *alloc_buffer(state_t *state, size_t length)
         if (buffer->size < length) {
             /* Requested size too large */
             state->num_available_tx += 1;
+            ZF_LOGE("Requested buffer size too large.");
             return NULL;
         } else {
             buffer->allocated = true;
             return buffer;
         }
     } else {
+        ZF_LOGF("No buffers left available");
         return NULL;
     }
 }
@@ -577,6 +579,7 @@ static void rx_queue_notify(seL4_Word badge, void *cookie)
             if (do_netif_input(&state->netif, p) != ERR_OK) {
                 /* If it is successfully received, the receiver controls
                  * whether or not it gets freed. */
+                ZF_LOGE("netif.input() != ERR_OK");
                 pbuf_free(p);
             }
 
@@ -730,6 +733,7 @@ int lwip_ethernet_async_client_init(ps_io_ops_t *io_ops, const char *tx_virtqueu
         );
         if (err == 0) {
             // ps_dma_free(&io_ops->dma_manager, buf, BUFFER_SIZE);
+            ZF_LOGE("Error during virtqueue_add_available_buf\n");
             break;
         }
         data->rx_queue_data[handle.cur] = buffer;

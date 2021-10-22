@@ -33,6 +33,7 @@
 
 #define LWIPSERVER_MAX_SOCKETS 32
 #define LWIPSERVER_MAX_PENDING 32
+#define MAX_MSG_LEN 1500
 
 typedef enum protocol_type {
     UDP,
@@ -297,7 +298,7 @@ static void tx_queue_handle(void)
 
         tx_msg_t *msg = camkes_virtqueue_device_offset_to_buffer(&tx_virtqueue, buf);
         ZF_LOGF_IF(msg == NULL, "msg is null");
-        ZF_LOGF_IF((msg->total_len > 1400) || (msg->total_len == 0),
+        ZF_LOGF_IF((msg->total_len > MAX_MSG_LEN) || (msg->total_len == 0),
                    "bad msg len in tx %zd", msg->total_len);
         //trace_extra_point_end(4, 1);
 
@@ -479,7 +480,7 @@ static void rx_queue_handle(void)
 
         tx_msg_t *msg = camkes_virtqueue_device_offset_to_buffer(&rx_virtqueue, buf);
         ZF_LOGF_IF(msg == NULL, "msg is null");
-        ZF_LOGF_IF((msg->total_len > 1400) || (msg->total_len == 0), "bad msg len in rx %zd", msg->total_len);
+        ZF_LOGF_IF((msg->total_len > MAX_MSG_LEN) || (msg->total_len == 0), "bad msg len in rx %zd", msg->total_len);
 
         error = server_check_common(msg->socket_fd);
         if (error) {
