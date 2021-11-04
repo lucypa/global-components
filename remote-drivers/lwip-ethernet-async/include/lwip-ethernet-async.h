@@ -37,11 +37,9 @@ typedef void (*register_get_mac_server_fn)(get_mac_server_fn_t get_mac, void *co
 int lwip_ethernet_async_client_init_late(void *cookie,
                                          register_callback_handler_fn_t register_handler);
 
-int lwip_ethernet_async_client_init(ps_io_ops_t *io_ops, const char *tx_virtqueue,
-                                    const char *rx_virtqueue,
+int lwip_ethernet_async_client_init(ps_io_ops_t *io_ops, 
                                     register_callback_handler_fn_t register_handler,
                                     get_mac_client_fn_t get_mac, void **cookie);
 
-int lwip_ethernet_async_server_init(ps_io_ops_t *io_ops, const char *tx_virtqueue,
-                                    const char *rx_virtqueue,
+int lwip_ethernet_async_server_init(ps_io_ops_t *io_ops,
                                     register_callback_handler_fn_t register_handler, register_get_mac_server_fn register_get_mac_fn);

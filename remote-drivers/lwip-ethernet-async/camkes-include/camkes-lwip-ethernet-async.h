@@ -18,25 +18,40 @@ import <lwip-ethernet-async.camkes>;
 #define lwip_ethernet_async_client_interfaces(name) \
     uses lwip_ethernet_async_control name##_control; \
     dataport Buf name##_dma_pool; \
-    uses VirtQueueDrv name##_tx; \
-    uses VirtQueueDrv name##_rx; \
+    include "ring.h"; \
+    dataport ring_t rx_avail; \
+    dataport ring_t rx_used; \
+    provides Notify rx_queue; \
+    dataport ring_t tx_avail; \
+    provides Notify tx_done; \
+    dataport ring_t tx_used; \
+    uses Notify tx_send; \
     emits Init name##_init1; \
     consumes Init name##_init2;
 
 #define lwip_ethernet_async_server_interfaces(name) \
     provides lwip_ethernet_async_control name##_control; \
     dataport Buf name##_dma_pool; \
-    uses VirtQueueDev name##_tx; \
-    uses VirtQueueDev name##_rx; \
+    include "ring.h"; \
+    dataport ring_t rx_avail; \
+    dataport ring_t rx_used; \
+    uses Notify rx_queue; \
+    dataport ring_t tx_avail; \
+    uses Notify tx_done; \
+    dataport ring_t tx_used; \
+    provides Notify tx_send; \
     emits Init name##_init1; \
     consumes Init name##_init2;
 
 #define lwip_ethernet_async_connections(name, client, driver) \
-    component VirtQueueInit name##d0; \
-    component VirtQueueInit name##d1; \
     connection seL4RPCNoThreads name##_eth_driver_conn(from client.name##_control, to driver.name##_control); \
-    connection seL4VirtQueues name##_virtq_conn0(to name##d0.init, from client.name##_tx, from driver.name##_tx); \
-    connection seL4VirtQueues name##_virtq_conn1(to name##d1.init, from client.name##_rx, from driver.name##_rx); \
+    connection seL4RPCCall notification(from client.rx_queue, to driver.rx_queue); \
+    connection seL4RPCCall notification(from client.tx_done, to driver.tx_done); \
+    connection seL4RPCCall notification(from driver.tx_used, to client.tx_used); \
+    connection seL4SharedData d1(from client.rx_avail, to driver.rx_avail); \
+    connection seL4SharedData d2(from client.rx_used, to driver.rx_used); \
+    connection seL4SharedData d3(from client.tx_avail, to driver.tx_avail); \
+    connection seL4SharedData d4(from client.tx_used, to driver.tx_used); \
     connection seL4DMASharedData name##_dma(from client.name##_dma_pool, to driver.name##_dma_pool); \
     connection LwipEthernetAsyncClientInit name##_client_init(from client.name##_init1, to client.name##_init2); \
     connection LwipEthernetAsyncServerInit name##_server_init(from driver.name##_init1, to driver.name##_init2);

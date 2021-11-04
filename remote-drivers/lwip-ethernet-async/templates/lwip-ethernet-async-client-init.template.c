@@ -18,8 +18,7 @@
 static void *instance_cookie;
 static int init_client_pre(ps_io_ops_t *io_ops) {
 
-    return lwip_ethernet_async_client_init(io_ops, "/*? connection_name ?*/_tx",
-                                           "/*? connection_name ?*/_rx",
+    return lwip_ethernet_async_client_init(io_ops,
                                            single_threaded_component_register_handler,
                                            /*? connection_name ?*/_control_mac, &instance_cookie);
 }

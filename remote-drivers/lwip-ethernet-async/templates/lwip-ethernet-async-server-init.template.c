@@ -38,8 +38,7 @@ void /*? configuration[me.parent.name].get('connection_name') ?*/_control_mac(ui
 }
 
 static int init_server(ps_io_ops_t *io_ops) {
-    return lwip_ethernet_async_server_init(io_ops, "/*? connection_name ?*/_tx",
-                                           "/*? connection_name ?*/_rx",
+    return lwip_ethernet_async_server_init(io_ops,
                                            single_threaded_component_register_handler,
                                            register_get_mac_fn);
 }
