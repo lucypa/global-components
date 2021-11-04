@@ -88,7 +88,6 @@ uint64_t idle_overflow_start;
 ccnt_t counter_values[8];
 counter_bitfield_t benchmark_bf;
 
-
 void getchar_handler(void)
 {
     seL4_Word badge;
@@ -123,10 +122,15 @@ void idle_start(void)
         printf("Measurment starting...\n");
         sel4bench_reset_counters();
         sel4bench_start_counters(benchmark_bf);
+        //next_dump_emit();
+        //prev_dump_wait();
         trace_start_emit();
 #ifdef CONFIG_BENCHMARK_TRACK_UTILISATION
+#ifdef CONFIG_DEBUG_BUILD
+        seL4_BenchmarkResetAllThreadsUtilisation();
+#else
         seL4_BenchmarkResetThreadUtilisation(camkes_get_tls()->tcb_cap);
-        //seL4_BenchmarkResetAllThreadsUtilisation();
+#endif
         seL4_BenchmarkResetLog();
 #elif defined(CONFIG_BENCHMARK_TRACK_KERNEL_ENTRIES)
         seL4_BenchmarkResetLog();
@@ -165,14 +169,12 @@ void idle_stop(uint64_t *total_ret, uint64_t *kernel_ret, uint64_t *idle_ret)
     sel4bench_read_and_stop_counters(benchmark_bf, 0, 8, counter_values);
 #ifdef CONFIG_BENCHMARK_TRACK_UTILISATION
     seL4_BenchmarkFinalizeLog();
-    //num_entries = seL4_BenchmarkFinalizeLog();
-    //printf("num_entries = %lu", num_entries);
-    //print_pcs(num_entries);
 
     seL4_BenchmarkGetThreadUtilisation(camkes_get_tls()->tcb_cap);
     uint64_t *buffer = (uint64_t *)&seL4_GetIPCBuffer()->msg[0];
-    //seL4_BenchmarkDumpAllThreadsUtilisation();
-    *kernel_ret = buffer[BENCHMARK_TOTAL_KERNEL_UTILISATION];
+#ifdef CONFIG_DEBUG_BUILD
+    seL4_BenchmarkDumpAllThreadsUtilisation();
+#else 
     printf("{\n");
     printf("\"total cycles\": %"PRIu64",\n", total);
     printf("\"kernel cycles\": %"PRIu64",\n", buffer[BENCHMARK_TOTAL_KERNEL_UTILISATION]);
@@ -181,6 +183,8 @@ void idle_stop(uint64_t *total_ret, uint64_t *kernel_ret, uint64_t *idle_ret)
     printf("\"idle kernel cycles\": %"PRIu64",\n", buffer[BENCHMARK_TCB_KERNEL_UTILISATION]);
     printf("\"idle kernel entries\": %"PRIu64"\n", buffer[BENCHMARK_TCB_NUMBER_KERNEL_ENTRIES]);
     printf("}\n");
+#endif
+    *kernel_ret = buffer[BENCHMARK_TOTAL_KERNEL_UTILISATION];
 #elif defined CONFIG_BENCHMARK_TRACK_KERNEL_ENTRIES
     /*base64_t streamer = base64_new(stdout);
     debug_log_buffer_dump_cbor64(&log_buffer, &streamer);
@@ -202,6 +206,8 @@ void idle_stop(uint64_t *total_ret, uint64_t *kernel_ret, uint64_t *idle_ret)
         printf("    %s:%lu\n", counter_names[i], counter_values[i]);
     }
     printf("}\n");
+    //next_dump_emit();
+    //prev_dump_wait();
     memset(counter_values, 0, 8);
 }
 
@@ -245,11 +251,7 @@ void pre_init(void)
     int n_chunks = sel4bench_get_num_counter_chunks(n_counters, ARRAY_SIZE(benchmarking_events));
     benchmark_bf = sel4bench_enable_counters(ARRAY_SIZE(benchmarking_events),
                                              benchmarking_events, 0, n_counters);
-    /*
-    seL4_CPtr log_cap = dataport_get_nth_frame_cap(&bench_buffer_handle, 0);
-    seL4_Error sel4_err = seL4_BenchmarkSetLogBuffer(log_cap);
-    ZF_LOGF_IF(sel4_err != seL4_NoError, "Failed to set log buffer");
-    */
+                                             
 #ifdef CONFIG_BENCHMARK_TRACK_KERNEL_ENTRIES
     seL4_CPtr log_cap = dataport_get_nth_frame_cap(&bench_buffer_handle, 0);
     seL4_Error sel4_err = seL4_BenchmarkSetLogBuffer(log_cap);

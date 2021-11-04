@@ -1226,8 +1226,8 @@ int lwip_socket_sync_server_init_late(ps_io_ops_t *io_ops, register_callback_han
 {
     callback_handler(0, "lwip_notify_client", notify_client, NULL);
 
-    int error = trace_extra_point_register_name(0, "inet_pseudo_chksum");
-    ZF_LOGF_IF(error, "Failed to register extra trace point 0");
+    /*int error = trace_extra_point_register_name(0, "inet_pseudo_chksum");
+    ZF_LOGF_IF(error, "Failed to register extra trace point 0");*/
 
     /*
     int error = trace_extra_point_register_name(0, "rx_queue_handle_in_handler");
