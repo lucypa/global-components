@@ -111,7 +111,7 @@ static uintprtr_t eth_allocate_rx_buf(void *iface, size_t buf_size, void **cooki
     return phys;
 }
 
-static void eth_rx_complete(void *iface, unsigned int num_bufs, void **cookies, unsigned int *lens)
+static int eth_rx_complete(void *iface, unsigned int num_bufs, void **cookies, unsigned int *lens)
 {
     server_data_t *state = iface;
     for (int i = 0; i < num_bufs; i++) {
@@ -124,17 +124,16 @@ static void eth_rx_complete(void *iface, unsigned int num_bufs, void **cookies, 
             rx_used_release();
             rx_used->write_idx++;
         } else {
-            ZF_LOGE("Queue is full. Dropping packet.");
-            // DO WE PUT IT BACK IN THE AVAILABLE QUEUE?
-            /* Disable RX IRQS? */
-            break;
+            ZF_LOGE("Queue is full. Disabling RX IRQs.");
+            /* inform driver to disable RX IRQs */
+            return -1;
         }
     }
 
     /* Notify the client */
     rx_queue_notify();
 
-    return;
+    return 0;
 }
 
 static struct raw_iface_callbacks ethdriver_callbacks = {
@@ -182,10 +181,10 @@ int lwip_ethernet_async_server_init(ps_io_ops_t *io_ops, register_callback_handl
     seL4_Word rx_badge;
 
 
-    error = register_handler(tx_badge, "lwip_tx_irq", tx_send_notify, data);
+    /*error = register_handler(tx_badge, "lwip_tx_irq", tx_send_notify, data);
     if (error) {
         ZF_LOGE("Unable to register handler");
-    }
+    }*/
     /*error = register_handler(rx_badge, "lwip_rx_irq", rx_queue_notify, data);
     if (error) {
         ZF_LOGE("Unable to register handler");

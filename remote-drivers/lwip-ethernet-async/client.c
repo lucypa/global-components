@@ -301,8 +301,8 @@ int lwip_ethernet_async_client_init(ps_io_ops_t *io_ops, register_callback_handl
     seL4_Word tx_badge;
     seL4_Word rx_badge;
 
-    register_handler(tx_badge, "lwip_tx_irq_from_ethernet", tx_done_notify, data);
-    register_handler(rx_badge, "lwip_rx_irq_from_ethernet", rx_queue_notify, data);
+    //register_handler(tx_badge, "lwip_tx_irq_from_ethernet", tx_done_notify, data);
+    //register_handler(rx_badge, "lwip_rx_irq_from_ethernet", rx_queue_notify, data);
 
     LWIP_MEMPOOL_INIT(RX_POOL);
     /* Pre allocate buffers */
