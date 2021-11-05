@@ -27,12 +27,11 @@
 #include <lwip/snmp.h>
 #include <lwip/sys.h>
 
-#include "ring.h"
+#include <ring.h>
 
 #define LINK_SPEED 1000000000 // Gigabit
 #define ETHER_MTU 1500
 #define NUM_BUFFERS 512
-#define RING_SIZE 512; // number of buffer slots in ring queues. 
 
 /*
  * These structures track the buffers used to construct packets
@@ -61,7 +60,7 @@ typedef struct state {
      */
     ethernet_buffer_t *available_tx[NUM_BUFFERS]; 
     size_t num_available_tx;
-} state_t
+} state_t;
 
 static state_t *data;
 
@@ -186,14 +185,14 @@ static struct pbuf *create_interface_buffer(ethernet_buffer_t *buffer, size_t le
 static void rx_queue_notify(void)
 {
     /* get buffers from used RX ring */
-    while((rx_used->write_idx - rx_used->read_idx % RING_SIZE) {
-        ethernet_buffer_t *buffer = rx_used->buffers[read_idx];
+    while((rx_used->write_idx - rx_used->read_idx) % RING_SIZE) {
+        ethernet_buffer_t *buffer = rx_used->buffers[rx_used->read_idx];
         rx_used_release();
         rx_used->read_idx++;
 
-        struct pbuf *p = create_interface_buffer(buffer, buffer->len)
+        struct pbuf *p = create_interface_buffer(buffer, buffer->len);
 
-        if (data->netif->input(p, netif) != ERR_OK) {
+        if (data->netif.input(p, netif) != ERR_OK) {
             // If it is successfully received, the receiver controls whether or not it gets freed.
             ZF_LOGE("netif.input() != ERR_OK");
             pbuf_free(p);
@@ -217,7 +216,7 @@ static err_t lwip_eth_send(struct netif *netif, struct pbuf *p)
 
     state_t *state = (state_t *)netif->state;
 
-    ethernet_buffer_t *buffer = alloc_tx_buffer(state, p->tot_len);
+    ethernet_buffer_t *buffer = alloc_tx_buffer(p->tot_len);
     if (buffer == NULL) {
         ZF_LOGF("Out of ethernet memory");
         return ERR_MEM;
@@ -240,13 +239,13 @@ static err_t lwip_eth_send(struct netif *netif, struct pbuf *p)
     /* insert into the used tx queue */
     if ((tx_used->write - tx_used->read + 1) % RING_SIZE) {
         ZF_LOGF("lwip_eth_send: Error while enqueuing used buffer, tx_used queue full");
-        free_buffer(state, buffer);
+        free_buffer(buffer);
     } else {
         tx_used->buffers[tx_used->write_idx % RING_SIZE];
         tx_used_release();
         tx_used->write_idx++;
         /* notify the server */
-        tx_send_notify(/* what goes here? */);
+        tx_send_notify();
     }
 
     return ret;
@@ -255,7 +254,7 @@ static err_t lwip_eth_send(struct netif *netif, struct pbuf *p)
 /* Packets have been sent. We can reuse their buffers. */
 static void tx_done_notify(void)
 {
-    while((tx_avail->write_idx - tx_avail->read_idx % RING_SIZE) {
+    while((tx_avail->write_idx - tx_avail->read_idx) % RING_SIZE) {
         ethernet_buffer_t *buffer = tx_avail->buffers[tx_avail->read_idx % RING_SIZE];
         mark_buffer_unused(buffer);
         tx_avail_release();

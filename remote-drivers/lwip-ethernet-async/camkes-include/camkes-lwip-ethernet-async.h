@@ -13,6 +13,7 @@
 #define _VAR_STRINGIZE(...) #__VA_ARGS__
 #define VAR_STRINGIZE(...) _VAR_STRINGIZE(__VA_ARGS__)
 
+import <std_connector.camkes>;
 import <lwip-ethernet-async.camkes>;
 
 #define lwip_ethernet_async_client_interfaces(name) \
@@ -45,9 +46,9 @@ import <lwip-ethernet-async.camkes>;
 
 #define lwip_ethernet_async_connections(name, client, driver) \
     connection seL4RPCNoThreads name##_eth_driver_conn(from client.name##_control, to driver.name##_control); \
-    connection seL4RPCCall notification(from client.rx_queue, to driver.rx_queue); \
-    connection seL4RPCCall notification(from client.tx_done, to driver.tx_done); \
-    connection seL4RPCCall notification(from driver.tx_used, to client.tx_used); \
+    connection seL4RPCCall notification1(from driver.rx_queue, to client.rx_queue); \
+    connection seL4RPCCall notification2(from driver.tx_done, to client.tx_done); \
+    connection seL4RPCCall notification3(from client.tx_send, to driver.tx_send); \
     connection seL4SharedData d1(from client.rx_avail, to driver.rx_avail); \
     connection seL4SharedData d2(from client.rx_used, to driver.rx_used); \
     connection seL4SharedData d3(from client.tx_avail, to driver.tx_avail); \

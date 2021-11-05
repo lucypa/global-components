@@ -31,10 +31,9 @@
 
 #include <utils/util.h>
 
-#include "ring.h"
+#include <ring.h>
 
 #define BUF_SIZE 2048
-#define RING_SIZE 512; // number of buffer slots in ring queues. 
 
 typedef struct data {
     struct eth_driver *eth_driver;
@@ -183,7 +182,7 @@ int lwip_ethernet_async_server_init(ps_io_ops_t *io_ops, register_callback_handl
     seL4_Word rx_badge;
 
 
-    error = register_handler(tx_badge, "lwip_tx_irq", tx_queue_notify, data);
+    error = register_handler(tx_badge, "lwip_tx_irq", tx_send_notify, data);
     if (error) {
         ZF_LOGE("Unable to register handler");
     }
