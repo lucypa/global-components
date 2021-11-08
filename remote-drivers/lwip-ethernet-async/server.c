@@ -34,6 +34,7 @@
 #include <ring.h>
 
 #define BUF_SIZE 2048
+#define ERR_QUEUE_FULL 1
 
 typedef struct data {
     struct eth_driver *eth_driver;
@@ -61,21 +62,20 @@ static void eth_tx_complete(void *iface, void *cookie)
 /* We have packets that need to be sent */
 static void tx_send_notify(void)
 {
-    /* Grab buffers from used tx ring, 
-    dma cache clean, uintptr_t phys = dma_pin */
+    /* Grab buffers from used tx ring */
     while (tx_used->write_idx - tx_used->read_idx % RING_SIZE) {
-        ethernet_buffer_t *buffer = tx_used->buffers[tx->used->read_idx % RING_SIZE];
+        ethernet_buffer_t *buffer = tx_used->buffers[tx_used->read_idx % RING_SIZE];
         tx_used_release();
         tx_used->read_idx++;
 
         void *decoded_buf = DECODE_DMA_ADDRESS(buffer);
         ZF_LOGF_IF(decoded_buf == NULL, "Decoded DMA buffer is NULL");
 
-        uintptr_t phys = ps_dma_pin(&data->io_ops->dma_manager, decoded_buf, buffer->lens);
-        ps_dma_cache_clean(&data->io_ops->dma_manager, decoded_buf, buffer->lens);
+        uintptr_t phys = ps_dma_pin(&data->io_ops->dma_manager, decoded_buf, buffer->len);
+        ps_dma_cache_clean(&data->io_ops->dma_manager, decoded_buf, buffer->len);
 
         // TODO: THIS CAN'T HANDLE CHAINED BUFFERS.
-        int err = data->eth_driver->i_fn.raw_tx(data->eth_driver, 1, &phys, buffer->lens, buffer);
+        int err = data->eth_driver->i_fn.raw_tx(data->eth_driver, 1, &phys, &buffer->len, buffer);
         if (err != ETHIF_TX_ENQUEUED) eth_tx_complete(data, buffer);
     
         // DOES THIS NEED TO BE HERE?
@@ -84,7 +84,7 @@ static void tx_send_notify(void)
     
 }
 
-static uintprtr_t eth_allocate_rx_buf(void *iface, size_t buf_size, void **cookie)
+static uintptr_t eth_allocate_rx_buf(void *iface, size_t buf_size, void **cookie)
 {
     if (buf_size > BUF_SIZE) {
         return 0;
@@ -104,7 +104,7 @@ static uintprtr_t eth_allocate_rx_buf(void *iface, size_t buf_size, void **cooki
     void *decoded_buf = DECODE_DMA_ADDRESS(buffer);
     ZF_LOGF_IF(decoded_buf == NULL, "Decoded DMA buffer is NULL");
 
-    *cookie = buffer. 
+    *cookie = buffer; 
     /* Invalidate the memory */
     ps_dma_cache_invalidate(&state->io_ops->dma_manager, decoded_buf, buf_size);
     uintptr_t phys = ps_dma_pin(&state->io_ops->dma_manager, decoded_buf, buf_size);
@@ -126,7 +126,7 @@ static int eth_rx_complete(void *iface, unsigned int num_bufs, void **cookies, u
         } else {
             ZF_LOGE("Queue is full. Disabling RX IRQs.");
             /* inform driver to disable RX IRQs */
-            return -1;
+            return ERR_QUEUE_FULL;
         }
     }
 

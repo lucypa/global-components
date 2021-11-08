@@ -192,7 +192,7 @@ static void rx_queue_notify(void)
 
         struct pbuf *p = create_interface_buffer(buffer, buffer->len);
 
-        if (data->netif.input(p, netif) != ERR_OK) {
+        if (data->netif.input(p, data->netif) != ERR_OK) {
             // If it is successfully received, the receiver controls whether or not it gets freed.
             ZF_LOGE("netif.input() != ERR_OK");
             pbuf_free(p);
@@ -333,8 +333,8 @@ int lwip_ethernet_async_client_init(ps_io_ops_t *io_ops, register_callback_handl
         rx_avail->buffers[rx_avail->write_idx % RING_SIZE] = buffer;
         rx_avail_release();
         rx_avail->write_idx++;
-
     }
+
     /* Allocate tx rings */
     data->num_available_tx = 0;
     for (int i = 0; i < NUM_BUFFERS - 1; i++) {

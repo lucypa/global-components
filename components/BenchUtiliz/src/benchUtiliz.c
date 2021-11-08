@@ -193,7 +193,7 @@ void idle_stop(uint64_t *total_ret, uint64_t *kernel_ret, uint64_t *idle_ret)
     debug_log_buffer_reset(&log_buffer);*/
     size_t entries = seL4_BenchmarkFinalizeLog();
     printf("Total entries = %d\n", entries);
-    seL4_BenchmarkTrackDumpSummary(&log_buffer, entries);
+    //seL4_BenchmarkTrackDumpSummary(&log_buffer, entries);
 #else 
     *kernel_ret = 0;
 #endif

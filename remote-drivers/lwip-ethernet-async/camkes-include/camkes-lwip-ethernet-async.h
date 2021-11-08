@@ -14,6 +14,7 @@
 #define VAR_STRINGIZE(...) _VAR_STRINGIZE(__VA_ARGS__)
 
 import <std_connector.camkes>;
+import <global-connectors.camkes>;
 import <lwip-ethernet-async.camkes>;
 
 #define lwip_ethernet_async_client_interfaces(name) \
