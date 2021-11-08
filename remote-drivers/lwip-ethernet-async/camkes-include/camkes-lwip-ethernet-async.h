@@ -23,11 +23,11 @@ import <lwip-ethernet-async.camkes>;
     include "ring.h"; \
     dataport ring_t rx_avail; \
     dataport ring_t rx_used; \
-    provides Notify rx_queue; \
+    consumes NF rx_queue; \
     dataport ring_t tx_avail; \
-    provides Notify tx_done; \
+    consumes NF tx_done; \
     dataport ring_t tx_used; \
-    uses Notify tx_send; \
+    emits NF tx_send; \
     emits Init name##_init1; \
     consumes Init name##_init2;
 
@@ -37,19 +37,19 @@ import <lwip-ethernet-async.camkes>;
     include "ring.h"; \
     dataport ring_t rx_avail; \
     dataport ring_t rx_used; \
-    uses Notify rx_queue; \
+    emits NF rx_queue; \
     dataport ring_t tx_avail; \
-    uses Notify tx_done; \
+    emits NF tx_done; \
     dataport ring_t tx_used; \
-    provides Notify tx_send; \
+    consumes NF tx_send; \
     emits Init name##_init1; \
     consumes Init name##_init2;
 
 #define lwip_ethernet_async_connections(name, client, driver) \
     connection seL4RPCNoThreads name##_eth_driver_conn(from client.name##_control, to driver.name##_control); \
-    connection seL4RPCCall notification1(from driver.rx_queue, to client.rx_queue); \
-    connection seL4RPCCall notification2(from driver.tx_done, to client.tx_done); \
-    connection seL4RPCCall notification3(from client.tx_send, to driver.tx_send); \
+    connection seL4Notification rx_queue(from driver.rx_queue, to client.rx_queue); \
+    connection seL4Notification tx_done(from driver.tx_done, to client.tx_done); \
+    connection seL4Notification tx_send(from client.tx_send, to driver.tx_send); \
     connection seL4SharedData d1(from client.rx_avail, to driver.rx_avail); \
     connection seL4SharedData d2(from client.rx_used, to driver.rx_used); \
     connection seL4SharedData d3(from client.tx_avail, to driver.tx_avail); \

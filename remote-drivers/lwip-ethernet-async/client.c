@@ -182,7 +182,7 @@ static struct pbuf *create_interface_buffer(ethernet_buffer_t *buffer, size_t le
 }
 
 /* New packets have been received and waiting in the used queue.*/
-static void rx_queue_notify(void)
+static void rx_queue(void)
 {
     /* get buffers from used RX ring */
     while((rx_used->write_idx - rx_used->read_idx) % RING_SIZE) {
@@ -199,6 +199,11 @@ static void rx_queue_notify(void)
         }
 
         rx_used_acquire();
+    }
+
+    int res = rx_queue_reg_callback(rx_queue, NULL);
+    if (res) {
+        ZF_LOGE("Failed to register rx_queue notification callback");
     }
 }
 
@@ -245,20 +250,25 @@ static err_t lwip_eth_send(struct netif *netif, struct pbuf *p)
         tx_used_release();
         tx_used->write_idx++;
         /* notify the server */
-        tx_send_notify();
+        tx_send_emit();
     }
 
     return ret;
 }
 
 /* Packets have been sent. We can reuse their buffers. */
-static void tx_done_notify(void)
+static void tx_done(void)
 {
     while((tx_avail->write_idx - tx_avail->read_idx) % RING_SIZE) {
         ethernet_buffer_t *buffer = tx_avail->buffers[tx_avail->read_idx % RING_SIZE];
         mark_buffer_unused(buffer);
         tx_avail_release();
         tx_avail->read_idx++;
+    }
+
+    int res = tx_done_reg_callback(tx_done, NULL);
+    if (res) {
+        ZF_LOGE("Failed to register tx done notification callback");
     }
 }
 
@@ -300,6 +310,16 @@ int lwip_ethernet_async_client_init(ps_io_ops_t *io_ops, register_callback_handl
 
     seL4_Word tx_badge;
     seL4_Word rx_badge;
+
+    int res = tx_done_reg_callback ? tx_done_reg_callback(tx_done, NULL): 0;
+    if (res) {
+        ZF_LOGE("Failed to register tx done notification callback");
+    }
+
+    res = rx_queue_reg_callback ? rx_queue_reg_callback(tx_done, NULL): 0;
+    if (res) {
+        ZF_LOGE("Failed to register rx_queue notification callback");
+    }
 
     //register_handler(tx_badge, "lwip_tx_irq_from_ethernet", tx_done_notify, data);
     //register_handler(rx_badge, "lwip_rx_irq_from_ethernet", rx_queue_notify, data);

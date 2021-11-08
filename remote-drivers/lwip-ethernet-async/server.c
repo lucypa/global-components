@@ -55,12 +55,12 @@ static void eth_tx_complete(void *iface, void *cookie)
         tx_avail_release();
         tx_avail->write_idx++;
         /* notify client */
-        tx_done_notify();
+        tx_done_emit();
     }
 }
 
 /* We have packets that need to be sent */
-static void tx_send_notify(void)
+static void tx_send(void *_arg)
 {
     /* Grab buffers from used tx ring */
     while (tx_used->write_idx - tx_used->read_idx % RING_SIZE) {
@@ -82,6 +82,10 @@ static void tx_send_notify(void)
         tx_used_acquire();
     }
     
+    int res = tx_send_reg_callback(tx_send, NULL);
+    if (res) {
+        ZF_LOGE("Failed to register tx_send notification callback");
+    }
 }
 
 static uintptr_t eth_allocate_rx_buf(void *iface, size_t buf_size, void **cookie)
@@ -131,7 +135,7 @@ static int eth_rx_complete(void *iface, unsigned int num_bufs, void **cookies, u
     }
 
     /* Notify the client */
-    rx_queue_notify();
+    rx_queue_emit();
 
     return 0;
 }
@@ -179,6 +183,11 @@ int lwip_ethernet_async_server_init(ps_io_ops_t *io_ops, register_callback_handl
 
     seL4_Word tx_badge;
     seL4_Word rx_badge;
+
+    int res = tx_send_reg_callback ? tx_send_reg_callback(tx_send, NULL): 0;
+    if (res) {
+        ZF_LOGE("Failed to register tx send notification callback");
+    }
 
 
     /*error = register_handler(tx_badge, "lwip_tx_irq", tx_send_notify, data);
