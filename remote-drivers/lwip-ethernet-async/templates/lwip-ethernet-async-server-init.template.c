@@ -21,26 +21,24 @@ void default_get_mac(uint8_t *b1, uint8_t *b2, uint8_t *b3, uint8_t *b4, uint8_t
 }
 
 static get_mac_server_fn_t get_mac_dispatch = default_get_mac;
-static void *get_mac_dispatch_cookie;
+static void *cookie;
 
 static void register_get_mac_fn(get_mac_server_fn_t get_mac, void *cookie)
 {
     get_mac_dispatch = get_mac;
-    get_mac_dispatch_cookie = cookie;
+    cookie = cookie;
 }
 
 void /*? configuration[me.parent.name].get('connection_name') ?*/_control_mac(uint8_t *b1, uint8_t *b2, uint8_t *b3, uint8_t *b4, uint8_t *b5, uint8_t *b6) {
     if (get_mac_dispatch) {
-        get_mac_dispatch(b1, b2, b3, b4, b5, b6, get_mac_dispatch_cookie);
+        get_mac_dispatch(b1, b2, b3, b4, b5, b6, cookie);
     } else {
         ZF_LOGE("/*? configuration[me.parent.name].get('connection_name') ?*/_control_mac has been removed on server side");
     }
 }
 
 static int init_server(ps_io_ops_t *io_ops) {
-    return lwip_ethernet_async_server_init(io_ops,
-                                           single_threaded_component_register_handler,
-                                           register_get_mac_fn);
+    return lwip_ethernet_async_server_init(io_ops, register_get_mac_fn, &tx, &rx, single_threaded_component_register_handler);
 }
 
 CAMKES_POST_INIT_MODULE_DEFINE(/*? connection_name ?*/_server_setup, init_server);

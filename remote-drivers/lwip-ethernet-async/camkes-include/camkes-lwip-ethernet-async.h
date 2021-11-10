@@ -21,13 +21,8 @@ import <lwip-ethernet-async.camkes>;
     uses lwip_ethernet_async_control name##_control; \
     dataport Buf name##_dma_pool; \
     include "ring.h"; \
-    dataport ring_t rx_avail; \
-    dataport ring_t rx_used; \
-    consumes NF rx_queue; \
-    dataport ring_t tx_avail; \
-    consumes NF tx_done; \
-    dataport ring_t tx_used; \
-    emits NF tx_send; \
+    dataport dataport_t rx; \
+    dataport dataport_t tx; \
     emits Init name##_init1; \
     consumes Init name##_init2;
 
@@ -35,25 +30,15 @@ import <lwip-ethernet-async.camkes>;
     provides lwip_ethernet_async_control name##_control; \
     dataport Buf name##_dma_pool; \
     include "ring.h"; \
-    dataport ring_t rx_avail; \
-    dataport ring_t rx_used; \
-    emits NF rx_queue; \
-    dataport ring_t tx_avail; \
-    emits NF tx_done; \
-    dataport ring_t tx_used; \
-    consumes NF tx_send; \
+    dataport dataport_t rx; \
+    dataport dataport_t tx; \
     emits Init name##_init1; \
     consumes Init name##_init2;
 
 #define lwip_ethernet_async_connections(name, client, driver) \
     connection seL4RPCNoThreads name##_eth_driver_conn(from client.name##_control, to driver.name##_control); \
-    connection seL4Notification rx_queue(from driver.rx_queue, to client.rx_queue); \
-    connection seL4Notification tx_done(from driver.tx_done, to client.tx_done); \
-    connection seL4Notification tx_send(from client.tx_send, to driver.tx_send); \
-    connection seL4SharedData d1(from client.rx_avail, to driver.rx_avail); \
-    connection seL4SharedData d2(from client.rx_used, to driver.rx_used); \
-    connection seL4SharedData d3(from client.tx_avail, to driver.tx_avail); \
-    connection seL4SharedData d4(from client.tx_used, to driver.tx_used); \
+    connection seL4SharedData d1(from client.rx, to driver.rx); \
+    connection seL4SharedData d3(from client.tx, to driver.tx); \
     connection seL4DMASharedData name##_dma(from client.name##_dma_pool, to driver.name##_dma_pool); \
     connection LwipEthernetAsyncClientInit name##_client_init(from client.name##_init1, to client.name##_init2); \
     connection LwipEthernetAsyncServerInit name##_server_init(from driver.name##_init1, to driver.name##_init2);

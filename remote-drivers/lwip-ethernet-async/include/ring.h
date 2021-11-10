@@ -12,6 +12,8 @@
 #ifndef _RING_H_
 #define _RING_H_
 
+#include <sel4/sel4.h>
+
 #define RING_SIZE 512 // number of buffer slots in ring queues. 
 #define BUFFER_SIZE 2048
 
@@ -35,8 +37,14 @@ typedef struct ethernet_buffer {
 typedef struct ring {
     ethernet_buffer_t *buffers[RING_SIZE];
     uint32_t write_idx;
-    uint32_t read_idx; 
+    uint32_t read_idx;
+    seL4_Word notify_badge; //TODO: Maybe change this to a function instead? 
 } ring_t;
+
+typedef struct dataport {
+    ring_t *available;
+    ring_t *used;
+} dataport_t;
 
 /* the reader always and only  modifies the read index, the writer the write index.  
 Reads/writes of a small integer are atomic.
