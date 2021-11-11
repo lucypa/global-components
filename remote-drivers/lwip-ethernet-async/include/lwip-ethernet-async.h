@@ -12,6 +12,7 @@
 
 #include <sel4/sel4.h>
 #include <platsupport/io.h>
+#include <ring.h>
 
 #define ENCODE_DMA_ADDRESS(buf) ({ \
     dataport_ptr_t wrapped_ptr = dataport_wrap_ptr(buf); \
@@ -34,10 +35,16 @@ typedef int (*register_callback_handler_fn_t)(seL4_Word badge, const char *, voi
                                               void *cookie);
 typedef void (*register_get_mac_server_fn)(get_mac_server_fn_t get_mac, void *cookie);
 
+typedef int (*register_cb_fn)(void (*cb)(void*), void *arg);
+typedef void (*rx_notify_fn)(void);
+typedef void (*tx_notify_fn)(void);
+
 
 int lwip_ethernet_async_client_init(ps_io_ops_t *io_ops, get_mac_client_fn_t get_mac, void **cookie, 
-                void *rx_dataport_buf, void *tx_dataport_buf, register_callback_handler_fn_t register_handler);
+                dataport_t *rx_dataport_buf, dataport_t *tx_dataport_buf, register_cb_fn reg_rx_cb, register_cb_fn reg_tx_cb, 
+                rx_notify_fn rx_notify, tx_notify_fn tx_notify);
 
 
 int lwip_ethernet_async_server_init(ps_io_ops_t *io_ops, register_get_mac_server_fn register_get_mac_fn,
-                void *rx_dataport_buf, void *tx_dataport_buf, register_callback_handler_fn_t register_handler);
+                dataport_t *rx_dataport_buf, dataport_t *tx_dataport_buf, register_cb_fn reg_rx_cb, register_cb_fn reg_tx_cb, 
+                rx_notify_fn rx_notify, tx_notify_fn tx_notify);

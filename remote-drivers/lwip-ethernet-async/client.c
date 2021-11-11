@@ -46,6 +46,21 @@ typedef enum {
     ORIGIN_TX_QUEUE,
 } ethernet_buffer_origin_t;
 
+typedef struct ethernet_buffer {
+    /* The acutal underlying memory of the buffer */
+    unsigned char *buffer;
+    /* The encoded DMA address */
+    uintptr_t dma_addr;
+    /* The physical size of the buffer */
+    size_t size;
+    /* Whether the buffer has been allocated */
+    bool allocated;
+    /* Whether the buffer is in use by the ethernet device */
+    bool in_async_use;
+    /* Queue from which the buffer was allocated */
+    char origin;
+} ethernet_buffer_t;
+
 typedef struct state {
     struct netif netif;
     /* mac address for this client */
@@ -55,17 +70,27 @@ typedef struct state {
     /* Pointers to shared buffers */
     dataport_t *tx;
     dataport_t *rx;
+
+    rx_notify_fn server_rx_notify;
+    tx_notify_fn server_tx_notify;
     /*
      * Metadata associated with buffers
      */
     ethernet_buffer_t buffer_metadata[NUM_BUFFERS * 2];
     /*
-     * Free buffers for TX; this is a first in last out queue. 
+     * Associated data for each element of the TX & RX virtqueue
      */
-    ethernet_buffer_t *available_tx[NUM_BUFFERS]; 
+    ethernet_buffer_t **tx_queue_data; /* These have the same index as the ring_t used */
+    ethernet_buffer_t **rx_queue_data;
+    /*
+     * Free buffers for TX
+     */
+    ethernet_buffer_t *available_tx[NUM_BUFFERS];
     size_t num_available_tx;
 } state_t;
 
+static register_cb_fn reg_rx_cb;
+static register_cb_fn reg_tx_cb;
 
 /* Allocate an empty TX buffer from the empty pool */
 static inline ethernet_buffer_t *alloc_tx_buffer(state_t *state, size_t length)
@@ -102,10 +127,12 @@ static inline void return_buffer(state_t *state, ethernet_buffer_t *buffer)
         case ORIGIN_RX_QUEUE: {
             // As the rx_available ring is the size of the number of buffers we have, 
             // the ring should never be full. 
-            ring_t *rx_avail = state->rx->available;
-            rx_avail->buffers[rx_avail->write_idx % RING_SIZE] = buffer;
+            ring_t *ring = state->rx->available;
+            ring->buffer[ring->write_idx % RING_SIZE] = buffer->dma_addr;
+            ring->len[ring->write_idx % RING_SIZE] = buffer->size;
+            state->rx_queue_data[ring->write_idx % RING_SIZE] = buffer;
             COMPILER_MEMORY_RELEASE();
-            rx_avail->write_idx++;
+            ring->write_idx++;
             break;
         }
     }
@@ -187,18 +214,24 @@ static struct pbuf *create_interface_buffer(state_t *state, ethernet_buffer_t *b
 }
 
 /* New packets have been received and waiting in the used queue.*/
-static void rx_queue(seL4_Word badge, void *cookie)
+static void rx_queue(void *cookie)
 {
     state_t *state = cookie;
     /* get buffers from used RX ring */
     ring_t *rx_used = state->rx->used;
 
     while((rx_used->write_idx - rx_used->read_idx) % RING_SIZE) {
-        ethernet_buffer_t *buffer = rx_used->buffers[rx_used->read_idx];
+        int index = rx_used->read_idx % RING_SIZE;
+
+        ethernet_buffer_t *buffer = state->rx_queue_data[index];
+        assert(!buffer->allocated);
+        buffer->allocated = true;
+        state->rx_queue_data[index] = NULL;
+
         COMPILER_MEMORY_RELEASE();
         rx_used->read_idx++;
 
-        struct pbuf *p = create_interface_buffer(state, buffer, buffer->len);
+        struct pbuf *p = create_interface_buffer(state, buffer, buffer->size);
 
         if (state->netif.input(p, &state->netif) != ERR_OK) {
             // If it is successfully received, the receiver controls whether or not it gets freed.
@@ -209,6 +242,7 @@ static void rx_queue(seL4_Word badge, void *cookie)
         COMPILER_MEMORY_ACQUIRE();
     }
 
+    reg_rx_cb(rx_queue, cookie);
     // TODO: The queue is empty. Notify the driver to re-enable RX IRQs. 
 }
 
@@ -252,24 +286,29 @@ static err_t lwip_eth_send(struct netif *netif, struct pbuf *p)
         ZF_LOGF("lwip_eth_send: Error while enqueuing used buffer, tx used queue full");
         free_buffer(state, buffer);
     } else {
-        tx_used->buffers[tx_used->write_idx % RING_SIZE];
+        tx_used->buffer[tx_used->write_idx % RING_SIZE] = (void*)ENCODE_DMA_ADDRESS(frame);
+        tx_used->len[tx_used->write_idx % RING_SIZE] = copied;
+        
+        state->tx_queue_data[tx_used->write_idx % RING_SIZE] = buffer;
         COMPILER_MEMORY_RELEASE();
         tx_used->write_idx++;
         /* notify the server */
-        seL4_Signal(tx_used->notify_badge);
+        state->server_tx_notify();
     }
 
     return ret;
 }
 
 /* Packets have been sent. We can reuse their buffers. */
-static void tx_done(seL4_Word badge, void *cookie)
+static void tx_done(void *cookie)
 {
     state_t *state = cookie;
     ring_t *tx_avail = state->tx->available;
 
     while((tx_avail->write_idx - tx_avail->read_idx) % RING_SIZE) {
-        ethernet_buffer_t *buffer = tx_avail->buffers[tx_avail->read_idx % RING_SIZE];
+        ethernet_buffer_t *buffer = state->tx_queue_data[tx_avail->read_idx % RING_SIZE];
+        state->tx_queue_data[tx_avail->read_idx % RING_SIZE] = NULL;
+
         COMPILER_MEMORY_RELEASE();
         tx_avail->read_idx++;
 
@@ -278,6 +317,9 @@ static void tx_done(seL4_Word badge, void *cookie)
 
         COMPILER_MEMORY_ACQUIRE();
     }
+
+    /* re register the notification callback. */
+    reg_tx_cb(tx_done, state);
 }
 
 static err_t ethernet_init(struct netif *netif)
@@ -304,19 +346,20 @@ static err_t ethernet_init(struct netif *netif)
     return ERR_OK;
 }
 
-static void client_init_tx(state_t *data, void *tx_dataport_buf, register_callback_handler_fn_t register_handler)
+static void client_init_tx(state_t *data, dataport_t *tx_dataport_buf, register_cb_fn reg_tx)
 {
     seL4_Word tx_badge;
 
-    int error = register_handler(tx_badge, "lwip_tx_irq_from_ethernet", tx_done, data);
+    int error = reg_tx(tx_done, data);
     if (error) {
         ZF_LOGE("Unable to register handler");
     }
 
-    data->tx = (dataport_t *)tx_dataport_buf;
+    reg_tx_cb = reg_tx;
+
+    data->tx = tx_dataport_buf;
 
     ring_t *tx_avail = data->tx->available;
-    tx_avail->notify_badge = tx_badge;
     tx_avail->write_idx = 0;
     tx_avail->read_idx = 0;
 
@@ -339,7 +382,7 @@ static void client_init_tx(state_t *data, void *tx_dataport_buf, register_callba
         ZF_LOGF_IF(!buf, "Failed to allocate buffer for pending TX ring.");
         memset(buf, 0, BUFFER_SIZE);
 
-        ethernet_buffer_t *buffer = &data->buffer_metadata[NUM_BUFFERS + i];
+        ethernet_buffer_t *buffer = &data->buffer_metadata[i + NUM_BUFFERS];
         *buffer = (ethernet_buffer_t) {
             .buffer = buf,
             .dma_addr = ENCODE_DMA_ADDRESS(buf),
@@ -349,23 +392,26 @@ static void client_init_tx(state_t *data, void *tx_dataport_buf, register_callba
             .in_async_use = false,
         };
 
-        data->available_tx[i] = buffer;
+        data->available_tx[data->num_available_tx] = buffer;
         data->num_available_tx++;
     }
 }
 
-static void client_init_rx(state_t *state, void *rx_dataport_buf, register_callback_handler_fn_t register_handler)
+static void client_init_rx(state_t *state, dataport_t *rx_dataport_buf, register_cb_fn reg_rx)
 {
-    seL4_Word rx_badge;
-    int error = register_handler(rx_badge, "lwip_rx_irq_from_ethernet", rx_queue, state);
+    ZF_LOGW("Client_init_rx");
+    int error = reg_rx(rx_queue, state);
     if (error) {
         ZF_LOGE("Unable to register handler");
     }
 
-    state->rx = (dataport_t *)rx_dataport_buf;
+    reg_rx_cb = reg_rx;
+
+    state->rx = rx_dataport_buf;
+    ZF_LOGW("Do we get here");
 
     ring_t *rx_used = state->rx->used;
-    rx_used->notify_badge = rx_badge;
+    ZF_LOGW("is this the problem");
     rx_used->write_idx = 0;
     rx_used->read_idx = 0;
 
@@ -373,6 +419,7 @@ static void client_init_rx(state_t *state, void *rx_dataport_buf, register_callb
     rx_avail->write_idx = 0;
     rx_avail->read_idx = 0;
 
+    ZF_LOGW("Or here");
     /* Pre allocate buffers */  
     for (int i = 0; i < NUM_BUFFERS - 1; i++) {
         void *buf = ps_dma_alloc(
@@ -397,14 +444,20 @@ static void client_init_rx(state_t *state, void *rx_dataport_buf, register_callb
             .in_async_use = false,
         };
 
-        rx_avail->buffers[rx_avail->write_idx % RING_SIZE] = buffer;
+        rx_avail->buffer[rx_avail->write_idx % RING_SIZE] = (void *)buffer->dma_addr;
+        rx_avail->buffer[rx_avail->write_idx % RING_SIZE] = buffer->size;
+
+        state->rx_queue_data[rx_avail->write_idx % RING_SIZE] = buffer;
         COMPILER_MEMORY_RELEASE();
         rx_avail->write_idx++;
     }
+
+    ZF_LOGW("Finished client init rx");
 }
 
 int lwip_ethernet_async_client_init(ps_io_ops_t *io_ops, get_mac_client_fn_t get_mac, void **cookie, 
-                void *rx_dataport_buf, void *tx_dataport_buf, register_callback_handler_fn_t register_handler)
+                dataport_t *rx_dataport_buf, dataport_t *tx_dataport_buf, register_cb_fn reg_rx_cb, register_cb_fn reg_tx_cb, 
+                rx_notify_fn rx_notify, tx_notify_fn tx_notify)
 {
     ZF_LOGW("HELLO client\n");
     state_t *data;
@@ -417,6 +470,22 @@ int lwip_ethernet_async_client_init(ps_io_ops_t *io_ops, get_mac_client_fn_t get
     ZF_LOGF_IF(error != 0, "Unable to ethernet state");
     data->io_ops = io_ops;
 
+    error = ps_calloc(
+        &io_ops->malloc_ops,
+        RING_SIZE,
+        sizeof(data->rx_queue_data[0]),
+        (void **)&data->rx_queue_data
+    );
+    ZF_LOGF_IF(error != 0, "Unable to allocate RX queue metadata");
+
+    error = ps_calloc(
+        &io_ops->malloc_ops,
+        RING_SIZE,
+        sizeof(data->tx_queue_data[0]),
+        (void **)&data->tx_queue_data
+    );
+    ZF_LOGF_IF(error != 0, "Unable to allocate TX queue metadata");
+
     /*error = ps_calloc(&io_ops->malloc_ops, 1, sizeof(struct dataport), (void **)&data->tx);
     ZF_LOGF_IF(error, "Failed to calloc dataport tx");
     error = ps_calloc(&io_ops->malloc_ops, 1, sizeof(struct dataport), (void **)&data->rx);
@@ -424,9 +493,12 @@ int lwip_ethernet_async_client_init(ps_io_ops_t *io_ops, get_mac_client_fn_t get
 
     LWIP_MEMPOOL_INIT(RX_POOL);
 
-    client_init_rx(data, rx_dataport_buf, register_handler);
+    data->server_rx_notify = rx_notify;
+    data->server_tx_notify = tx_notify;
+
+    client_init_rx(data, rx_dataport_buf, reg_rx_cb);
     ZF_LOGW("Rx avail write_idx = %d", data->rx->available->write_idx);
-    client_init_tx(data, tx_dataport_buf, register_handler);
+    client_init_tx(data, tx_dataport_buf, reg_tx_cb);
 
     get_mac(&data->mac[0], &data->mac[1], &data->mac[2], &data->mac[3], &data->mac[4], &data->mac[5]);
 

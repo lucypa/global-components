@@ -45,7 +45,12 @@ typedef struct data {
     /* Pointers to shared buffers */
     dataport_t *tx;
     dataport_t *rx;
+
+    rx_notify_fn client_rx_notify;
+    tx_notify_fn client_tx_notify;
 } server_data_t;
+
+static register_cb_fn reg_tx_cb;
 
 /* Packets have been transferred or dropped. */
 static void eth_tx_complete(void *iface, void *cookie)
@@ -56,11 +61,11 @@ static void eth_tx_complete(void *iface, void *cookie)
     if ((tx_avail->write_idx - tx_avail->read_idx + 1) % RING_SIZE) {
         ZF_LOGF("lwip_eth_send: Error while enqueuing available buffer, tx available queue full");
     } else {
-        tx_avail->buffers[tx_avail->write_idx % RING_SIZE] = cookie;
+        tx_avail->buffer[tx_avail->write_idx % RING_SIZE] = cookie;
         COMPILER_MEMORY_RELEASE();
         tx_avail->write_idx++;
         /* notify client */
-        seL4_Signal(tx_avail->notify_badge);
+        state->client_tx_notify();
     }
 }
 
@@ -83,14 +88,14 @@ static uintptr_t eth_allocate_rx_buf(void *iface, size_t buf_size, void **cookie
         return 0;
     }
 
-    ethernet_buffer_t *buffer = rx_avail->buffers[rx_avail->read_idx % RING_SIZE];
+    void *buffer = rx_avail->buffer[rx_avail->read_idx % RING_SIZE];
+    *cookie = buffer; 
     COMPILER_MEMORY_RELEASE();
     rx_avail->read_idx++;
 
     void *decoded_buf = DECODE_DMA_ADDRESS(buffer);
     ZF_LOGF_IF(decoded_buf == NULL, "Decoded DMA buffer is NULL");
 
-    *cookie = buffer; 
     /* Invalidate the memory */
     ps_dma_cache_invalidate(&state->io_ops->dma_manager, decoded_buf, buf_size);
     uintptr_t phys = ps_dma_pin(&state->io_ops->dma_manager, decoded_buf, buf_size);
@@ -103,12 +108,10 @@ static int eth_rx_complete(void *iface, unsigned int num_bufs, void **cookies, u
     ring_t *rx_used = state->rx->used;
 
     for (int i = 0; i < num_bufs; i++) {
-        // Add buffers to used rx ring. 
-        ethernet_buffer_t *buffer = cookies[i];
-        buffer->len = lens[i];
-
+        /* Add buffers to used rx ring. */
         if (!(rx_used->write_idx - rx_used->read_idx + 1) % RING_SIZE) {
-            rx_used->buffers[rx_used->write_idx % RING_SIZE] = buffer;
+            rx_used->buffer[rx_used->write_idx % RING_SIZE] = cookies[i];
+            rx_used->buffer[rx_used->write_idx % RING_SIZE] = lens[i];
             COMPILER_MEMORY_RELEASE();
             rx_used->write_idx++;
         } else {
@@ -121,7 +124,7 @@ static int eth_rx_complete(void *iface, unsigned int num_bufs, void **cookies, u
     }
 
     /* Notify the client */
-    seL4_Signal(rx_used->notify_badge);
+    state->client_rx_notify();
 
     return 0;
 }
@@ -133,29 +136,32 @@ static struct raw_iface_callbacks ethdriver_callbacks = {
 };
 
 /* We have packets that need to be sent */
-static void tx_send(seL4_Word badge, void *cookie)
+static void tx_send(void *cookie)
 {
     server_data_t *state = cookie;
     ring_t *tx_used = state->tx->used;
     /* Grab buffers from used tx ring */
     while (tx_used->write_idx - tx_used->read_idx % RING_SIZE) {
-        ethernet_buffer_t *buffer = tx_used->buffers[tx_used->read_idx % RING_SIZE];
+        void *buffer = tx_used->buffer[tx_used->read_idx % RING_SIZE];
+        size_t len = tx_used->len[tx_used->read_idx % RING_SIZE];
         COMPILER_MEMORY_RELEASE();
         tx_used->read_idx++;
 
         void *decoded_buf = DECODE_DMA_ADDRESS(buffer);
         ZF_LOGF_IF(decoded_buf == NULL, "Decoded DMA buffer is NULL");
 
-        uintptr_t phys = ps_dma_pin(&state->io_ops->dma_manager, decoded_buf, buffer->len);
-        ps_dma_cache_clean(&state->io_ops->dma_manager, decoded_buf, buffer->len);
+        uintptr_t phys = ps_dma_pin(&state->io_ops->dma_manager, decoded_buf, len);
+        ps_dma_cache_clean(&state->io_ops->dma_manager, decoded_buf, len);
 
         // TODO: THIS CAN'T HANDLE CHAINED BUFFERS.
-        int err = state->eth_driver->i_fn.raw_tx(state->eth_driver, 1, &phys, &buffer->len, buffer);
+        int err = state->eth_driver->i_fn.raw_tx(state->eth_driver, 1, &phys, &len, buffer);
         if (err != ETHIF_TX_ENQUEUED) eth_tx_complete(state, buffer);
     
         // DOES THIS NEED TO BE HERE?
         COMPILER_MEMORY_ACQUIRE();
     }
+
+    reg_tx_cb(tx_send, state);
 }
 
 static void client_get_mac(uint8_t *b1, uint8_t *b2, uint8_t *b3, uint8_t *b4, uint8_t *b5, uint8_t *b6, void *cookie)
@@ -177,21 +183,19 @@ static int hardware_interface_searcher(void *cookie, void *interface_instance, c
     return PS_INTERFACE_FOUND_MATCH;
 }
 
-static void server_init_tx(server_data_t *state, void *tx_dataport_buf, register_callback_handler_fn_t register_handler)
+static void server_init_tx(server_data_t *state, dataport_t *tx_dataport_buf, register_cb_fn reg_tx)
 {
-    seL4_Word tx_badge;
-    int error = register_handler(tx_badge, "lwip_tx_irq", tx_send, state);
+    int error = reg_tx(tx_send, state);
     if (error) {
         ZF_LOGE("Unable to register handler");
     }
 
-    state->tx = (dataport_t *)tx_dataport_buf;
-   
-    ring_t *tx_used = state->tx->used;
-    tx_used->notify_badge = tx_badge;
+    state->tx = tx_dataport_buf;
+    
+    reg_tx_cb = reg_tx;
 }
 
-static void server_init_rx(server_data_t *state, void *rx_dataport_buf, register_callback_handler_fn_t register_handler)
+static void server_init_rx(server_data_t *state, dataport_t *rx_dataport_buf, register_cb_fn reg_rx)
 {
 
     //seL4_Word rx_badge;
@@ -199,8 +203,9 @@ static void server_init_rx(server_data_t *state, void *rx_dataport_buf, register
     if (error) {
         ZF_LOGE("Unable to register handler");
     }*/
-
-    state->rx = (dataport_t *)rx_dataport_buf;
+    ZF_LOGW("server_init_rx");
+    state->rx = rx_dataport_buf;
+    ZF_LOGW("Rx available write_idx = %d", state->rx->available->write_idx);
     
     // TODO: set up notification channel from client to server when rx_queue is empty. 
 
@@ -208,7 +213,8 @@ static void server_init_rx(server_data_t *state, void *rx_dataport_buf, register
 }
 
 int lwip_ethernet_async_server_init(ps_io_ops_t *io_ops, register_get_mac_server_fn register_get_mac_fn,
-                void *rx_dataport_buf, void *tx_dataport_buf, register_callback_handler_fn_t register_handler)
+                dataport_t *rx_dataport_buf, dataport_t *tx_dataport_buf, register_cb_fn reg_rx_cb, register_cb_fn reg_tx_cb, 
+                rx_notify_fn rx_notify, tx_notify_fn tx_notify)
 {
     ZF_LOGW("HELLO server\n"); 
     server_data_t *data;
@@ -221,8 +227,11 @@ int lwip_ethernet_async_server_init(ps_io_ops_t *io_ops, register_get_mac_server
     error = ps_calloc(&io_ops->malloc_ops, 1, sizeof(struct dataport), (void **)&data->rx);
     ZF_LOGF_IF(error, "Failed to calloc dataport rx");*/
 
-    server_init_rx(data, rx_dataport_buf, register_handler);
-    server_init_tx(data, tx_dataport_buf, register_handler);
+    server_init_rx(data, rx_dataport_buf, reg_rx_cb);
+    server_init_tx(data, tx_dataport_buf, reg_tx_cb);
+
+    data->client_rx_notify = rx_notify;
+    data->client_tx_notify = tx_notify;
 
     error = ps_interface_find(&io_ops->interface_registration_ops,
                               PS_ETHERNET_INTERFACE, hardware_interface_searcher, data);
