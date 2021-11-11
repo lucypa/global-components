@@ -62,7 +62,7 @@ static void eth_tx_complete(void *iface, void *cookie)
         ZF_LOGF("lwip_eth_send: Error while enqueuing available buffer, tx available queue full");
     } else {
         tx_avail->buffer[tx_avail->write_idx % RING_SIZE] = cookie;
-        COMPILER_MEMORY_RELEASE();
+        THREAD_MEMORY_RELEASE();
         tx_avail->write_idx++;
         /* notify client */
         state->client_tx_notify();
@@ -111,7 +111,7 @@ static int eth_rx_complete(void *iface, unsigned int num_bufs, void **cookies, u
         if (!(rx_used->write_idx - rx_used->read_idx + 1) % RING_SIZE) {
             rx_used->buffer[rx_used->write_idx % RING_SIZE] = cookies[i];
             rx_used->buffer[rx_used->write_idx % RING_SIZE] = lens[i];
-            COMPILER_MEMORY_RELEASE();
+            THREAD_MEMORY_RELEASE();
             rx_used->write_idx++;
         } else {
             ZF_LOGE("Queue is full. Disabling RX IRQs.");
@@ -143,7 +143,7 @@ static void tx_send(void *cookie)
     while (tx_used->write_idx - tx_used->read_idx % RING_SIZE) {
         void *buffer = tx_used->buffer[tx_used->read_idx % RING_SIZE];
         size_t len = tx_used->len[tx_used->read_idx % RING_SIZE];
-        COMPILER_MEMORY_RELEASE();
+        THREAD_MEMORY_RELEASE();
         tx_used->read_idx++;
 
         void *decoded_buf = DECODE_DMA_ADDRESS(buffer);
@@ -160,7 +160,8 @@ static void tx_send(void *cookie)
         COMPILER_MEMORY_ACQUIRE();
     }
 
-    reg_tx_cb(tx_send, state);
+    int error = reg_tx_cb(tx_send, state);
+    ZF_LOGF_IF(error, "Unable to register transmit callback handler");
 }
 
 static void client_get_mac(uint8_t *b1, uint8_t *b2, uint8_t *b3, uint8_t *b4, uint8_t *b5, uint8_t *b6, void *cookie)
@@ -196,15 +197,9 @@ static void server_init_tx(server_data_t *state, void *tx_dataport_buf, register
 
 static void server_init_rx(server_data_t *state, void *rx_dataport_buf, register_cb_fn reg_rx)
 {
-
-    //seL4_Word rx_badge;
-    /*int error = register_handler(rx_badge, "lwip_rx_irq", rx, state);
-    if (error) {
-        ZF_LOGE("Unable to register handler");
-    }*/
     ZF_LOGW("server_init_rx");
     state->rx = (dataport_t *)rx_dataport_buf;
-    ZF_LOGW("Rx available write_idx = %d", state->rx->available->write_idx);
+    // ZF_LOGW("Rx available write_idx = %d, read_idx = %d\n", state->rx->available->write_idx, state->rx->available->read_idx);
     
     // TODO: set up notification channel from client to server when rx_queue is empty. 
 
@@ -220,11 +215,6 @@ int lwip_ethernet_async_server_init(ps_io_ops_t *io_ops, register_get_mac_server
     int error = ps_calloc(&io_ops->malloc_ops, 1, sizeof(*data), (void **)&data);
     ZF_LOGF_IF(error, "Failed to calloc server data");
     data->io_ops = io_ops;
-
-    /*error = ps_calloc(&io_ops->malloc_ops, 1, sizeof(struct dataport), (void **)&data->tx);
-    ZF_LOGF_IF(error, "Failed to calloc dataport tx");
-    error = ps_calloc(&io_ops->malloc_ops, 1, sizeof(struct dataport), (void **)&data->rx);
-    ZF_LOGF_IF(error, "Failed to calloc dataport rx");*/
 
     server_init_rx(data, rx_dataport_buf, reg_rx_cb);
     server_init_tx(data, tx_dataport_buf, reg_tx_cb);
