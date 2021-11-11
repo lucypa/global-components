@@ -41,10 +41,10 @@ typedef void (*tx_notify_fn)(void);
 
 
 int lwip_ethernet_async_client_init(ps_io_ops_t *io_ops, get_mac_client_fn_t get_mac, void **cookie, 
-                dataport_t *rx_dataport_buf, dataport_t *tx_dataport_buf, register_cb_fn reg_rx_cb, register_cb_fn reg_tx_cb, 
+                void *rx_dataport_buf, void *tx_dataport_buf, register_cb_fn reg_rx_cb, register_cb_fn reg_tx_cb, 
                 rx_notify_fn rx_notify, tx_notify_fn tx_notify);
 
 
 int lwip_ethernet_async_server_init(ps_io_ops_t *io_ops, register_get_mac_server_fn register_get_mac_fn,
-                dataport_t *rx_dataport_buf, dataport_t *tx_dataport_buf, register_cb_fn reg_rx_cb, register_cb_fn reg_tx_cb, 
+                void *rx_dataport_buf, void *tx_dataport_buf, register_cb_fn reg_rx_cb, register_cb_fn reg_tx_cb, 
                 rx_notify_fn rx_notify, tx_notify_fn tx_notify);

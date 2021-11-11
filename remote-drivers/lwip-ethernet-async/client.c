@@ -346,7 +346,7 @@ static err_t ethernet_init(struct netif *netif)
     return ERR_OK;
 }
 
-static void client_init_tx(state_t *data, dataport_t *tx_dataport_buf, register_cb_fn reg_tx)
+static void client_init_tx(state_t *data, void *tx_dataport_buf, register_cb_fn reg_tx)
 {
     seL4_Word tx_badge;
 
@@ -357,7 +357,7 @@ static void client_init_tx(state_t *data, dataport_t *tx_dataport_buf, register_
 
     reg_tx_cb = reg_tx;
 
-    data->tx = tx_dataport_buf;
+    data->tx = (dataport_t *)tx_dataport_buf;
 
     ring_t *tx_avail = data->tx->available;
     tx_avail->write_idx = 0;
@@ -397,7 +397,7 @@ static void client_init_tx(state_t *data, dataport_t *tx_dataport_buf, register_
     }
 }
 
-static void client_init_rx(state_t *state, dataport_t *rx_dataport_buf, register_cb_fn reg_rx)
+static void client_init_rx(state_t *state, void *rx_dataport_buf, register_cb_fn reg_rx)
 {
     ZF_LOGW("Client_init_rx");
     int error = reg_rx(rx_queue, state);
@@ -407,11 +407,9 @@ static void client_init_rx(state_t *state, dataport_t *rx_dataport_buf, register
 
     reg_rx_cb = reg_rx;
 
-    state->rx = rx_dataport_buf;
-    ZF_LOGW("Do we get here");
+    state->rx = (dataport_t *)rx_dataport_buf;
 
     ring_t *rx_used = state->rx->used;
-    ZF_LOGW("is this the problem");
     rx_used->write_idx = 0;
     rx_used->read_idx = 0;
 
@@ -419,7 +417,6 @@ static void client_init_rx(state_t *state, dataport_t *rx_dataport_buf, register
     rx_avail->write_idx = 0;
     rx_avail->read_idx = 0;
 
-    ZF_LOGW("Or here");
     /* Pre allocate buffers */  
     for (int i = 0; i < NUM_BUFFERS - 1; i++) {
         void *buf = ps_dma_alloc(
@@ -452,11 +449,10 @@ static void client_init_rx(state_t *state, dataport_t *rx_dataport_buf, register
         rx_avail->write_idx++;
     }
 
-    ZF_LOGW("Finished client init rx");
 }
 
 int lwip_ethernet_async_client_init(ps_io_ops_t *io_ops, get_mac_client_fn_t get_mac, void **cookie, 
-                dataport_t *rx_dataport_buf, dataport_t *tx_dataport_buf, register_cb_fn reg_rx_cb, register_cb_fn reg_tx_cb, 
+                void *rx_dataport_buf, void *tx_dataport_buf, register_cb_fn reg_rx_cb, register_cb_fn reg_tx_cb, 
                 rx_notify_fn rx_notify, tx_notify_fn tx_notify)
 {
     ZF_LOGW("HELLO client\n");

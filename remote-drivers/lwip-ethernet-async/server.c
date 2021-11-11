@@ -78,8 +78,7 @@ static uintptr_t eth_allocate_rx_buf(void *iface, size_t buf_size, void **cookie
     }
     server_data_t *state = iface;
 
-    COMPILER_MEMORY_ACQUIRE();
-    volatile ring_t *rx_avail = state->rx->available;
+    ring_t *rx_avail = state->rx->available;
  
     /* Try to grab a buffer from the available ring */
     if (!(rx_avail->write_idx - rx_avail->read_idx % RING_SIZE)) {
@@ -183,19 +182,19 @@ static int hardware_interface_searcher(void *cookie, void *interface_instance, c
     return PS_INTERFACE_FOUND_MATCH;
 }
 
-static void server_init_tx(server_data_t *state, dataport_t *tx_dataport_buf, register_cb_fn reg_tx)
+static void server_init_tx(server_data_t *state, void *tx_dataport_buf, register_cb_fn reg_tx)
 {
     int error = reg_tx(tx_send, state);
     if (error) {
         ZF_LOGE("Unable to register handler");
     }
 
-    state->tx = tx_dataport_buf;
+    state->tx = (dataport_t *)tx_dataport_buf;
     
     reg_tx_cb = reg_tx;
 }
 
-static void server_init_rx(server_data_t *state, dataport_t *rx_dataport_buf, register_cb_fn reg_rx)
+static void server_init_rx(server_data_t *state, void *rx_dataport_buf, register_cb_fn reg_rx)
 {
 
     //seL4_Word rx_badge;
@@ -204,7 +203,7 @@ static void server_init_rx(server_data_t *state, dataport_t *rx_dataport_buf, re
         ZF_LOGE("Unable to register handler");
     }*/
     ZF_LOGW("server_init_rx");
-    state->rx = rx_dataport_buf;
+    state->rx = (dataport_t *)rx_dataport_buf;
     ZF_LOGW("Rx available write_idx = %d", state->rx->available->write_idx);
     
     // TODO: set up notification channel from client to server when rx_queue is empty. 
@@ -213,7 +212,7 @@ static void server_init_rx(server_data_t *state, dataport_t *rx_dataport_buf, re
 }
 
 int lwip_ethernet_async_server_init(ps_io_ops_t *io_ops, register_get_mac_server_fn register_get_mac_fn,
-                dataport_t *rx_dataport_buf, dataport_t *tx_dataport_buf, register_cb_fn reg_rx_cb, register_cb_fn reg_tx_cb, 
+                void *rx_dataport_buf, void *tx_dataport_buf, register_cb_fn reg_rx_cb, register_cb_fn reg_tx_cb, 
                 rx_notify_fn rx_notify, tx_notify_fn tx_notify)
 {
     ZF_LOGW("HELLO server\n"); 
