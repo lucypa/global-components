@@ -16,7 +16,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define RING_SIZE 512 // number of buffer slots in ring queues. 
+#define RING_SIZE 127
 #define BUFFER_SIZE 2048
 
 typedef struct ring {
@@ -27,8 +27,8 @@ typedef struct ring {
 } ring_t;
 
 typedef struct dataport {
-    ring_t *available;
-    ring_t *used;
+    ring_t available;
+    ring_t used;
 } dataport_t;
 
 /* the reader always and only  modifies the read index, the writer the write index.  

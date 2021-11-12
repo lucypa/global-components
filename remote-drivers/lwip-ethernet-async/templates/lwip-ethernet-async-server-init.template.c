@@ -12,6 +12,7 @@
 
 #include <lwip-ethernet-async.h>
 #include <camkes.h>
+#include <sel4/syscalls.h>
 
 /*- set connection_name = configuration[me.parent.name].get('connection_name') -*/
 
@@ -38,6 +39,7 @@ void /*? configuration[me.parent.name].get('connection_name') ?*/_control_mac(ui
 }
 
 static int init_server(ps_io_ops_t *io_ops) {
+
     return lwip_ethernet_async_server_init(io_ops, register_get_mac_fn, 
                 &tx_buf, &rx_buf, NULL, tx_ready_reg_callback, rx_done_emit, tx_done_emit);
 }

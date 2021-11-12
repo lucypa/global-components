@@ -20,6 +20,7 @@ import <lwip-ethernet-async.camkes>;
 #define lwip_ethernet_async_client_interfaces(name) \
     uses lwip_ethernet_async_control name##_control; \
     dataport Buf name##_dma_pool; \
+    emits Signal s; \
     include "ring.h"; \
     dataport dataport_t rx; \
     consumes Notification rx_done; \
@@ -32,6 +33,7 @@ import <lwip-ethernet-async.camkes>;
 #define lwip_ethernet_async_server_interfaces(name) \
     provides lwip_ethernet_async_control name##_control; \
     dataport Buf name##_dma_pool; \
+    consumes Signal s; \
     include "ring.h"; \
     dataport dataport_t rx_buf; \
     emits Notification rx_done; \
@@ -43,6 +45,7 @@ import <lwip-ethernet-async.camkes>;
 
 #define lwip_ethernet_async_connections(name, client, driver) \
     connection seL4RPCNoThreads name##_eth_driver_conn(from client.name##_control, to driver.name##_control); \
+    connection seL4Notification init_done(from client.s, to driver.s); \
     connection seL4SharedData d1(from client.rx, to driver.rx_buf); \
     connection seL4SharedData d3(from client.tx, to driver.tx_buf); \
     connection seL4Notification tx_ready(from client.tx_ready, to driver.tx_ready); \
