@@ -31,7 +31,7 @@
 
 #define LINK_SPEED 1000000000 // Gigabit
 #define ETHER_MTU 1500
-#define NUM_BUFFERS 127
+#define NUM_BUFFERS 255
 
 /*
  * These structures track the buffers used to construct packets
@@ -68,8 +68,10 @@ typedef struct state {
     ps_io_ops_t *io_ops;
 
     /* Pointers to shared buffers */
-    dataport_t *tx;
-    dataport_t *rx;
+    ring_t *rx_avail;
+    ring_t *rx_used;
+    ring_t *tx_avail;
+    ring_t *tx_used;
 
     notify_fn server_rx_notify;
     notify_fn server_tx_notify;
@@ -127,13 +129,12 @@ static inline void return_buffer(state_t *state, ethernet_buffer_t *buffer)
         case ORIGIN_RX_QUEUE: {
             // As the rx_available ring is the size of the number of buffers we have, 
             // the ring should never be full. 
-            ring_t ring = state->rx->available;
-            ring.buffer[ring.write_idx % RING_SIZE] = buffer->dma_addr;
-            ring.len[ring.write_idx % RING_SIZE] = buffer->size;
-            state->rx_queue_data[ring.write_idx % RING_SIZE] = buffer;
+            ring_t *ring = state->rx_avail;
+            ring->buffer[ring->write_idx % RING_SIZE] = buffer->dma_addr;
+            ring->len[ring->write_idx % RING_SIZE] = buffer->size;
+            state->rx_queue_data[ring->write_idx % RING_SIZE] = buffer;
             THREAD_MEMORY_RELEASE();
-            ring.write_idx++;
-            ZF_LOGW("Does THIS happen?");
+            ring->write_idx++;
             break;
         }
     }
@@ -219,10 +220,10 @@ static void rx_queue(void *cookie)
 {
     state_t *state = cookie;
     /* get buffers from used RX ring */
-    ring_t rx_used = state->rx->used;
+    ring_t *rx_used = state->rx_used;
 
-    while((rx_used.write_idx - rx_used.read_idx) % RING_SIZE) {
-        int index = rx_used.read_idx % RING_SIZE;
+    while((rx_used->write_idx - rx_used->read_idx) % RING_SIZE) {
+        int index = rx_used->read_idx % RING_SIZE;
 
         ethernet_buffer_t *buffer = state->rx_queue_data[index];
         assert(!buffer->allocated);
@@ -230,7 +231,7 @@ static void rx_queue(void *cookie)
         state->rx_queue_data[index] = NULL;
 
         THREAD_MEMORY_RELEASE();
-        rx_used.read_idx++;
+        rx_used->read_idx++;
 
         struct pbuf *p = create_interface_buffer(state, buffer, buffer->size);
 
@@ -281,18 +282,18 @@ static err_t lwip_eth_send(struct netif *netif, struct pbuf *p)
 
     mark_buffer_used(buffer);
 
-    ring_t tx_used = state->tx->used;
+    ring_t *tx_used = state->tx_used;
     /* insert into the used tx queue */
-    if ((tx_used.write_idx - tx_used.read_idx + 1) % RING_SIZE) {
+    if ((tx_used->write_idx - tx_used->read_idx + 1) % RING_SIZE) {
         ZF_LOGF("lwip_eth_send: Error while enqueuing used buffer, tx used queue full");
         free_buffer(state, buffer);
     } else {
-        tx_used.buffer[tx_used.write_idx % RING_SIZE] = (void*)ENCODE_DMA_ADDRESS(frame);
-        tx_used.len[tx_used.write_idx % RING_SIZE] = copied;
+        tx_used->buffer[tx_used->write_idx % RING_SIZE] = (void*)ENCODE_DMA_ADDRESS(frame);
+        tx_used->len[tx_used->write_idx % RING_SIZE] = copied;
         
-        state->tx_queue_data[tx_used.write_idx % RING_SIZE] = buffer;
+        state->tx_queue_data[tx_used->write_idx % RING_SIZE] = buffer;
         THREAD_MEMORY_RELEASE();
-        tx_used.write_idx++;
+        tx_used->write_idx++;
         /* notify the server */
         state->server_tx_notify();
     }
@@ -304,14 +305,14 @@ static err_t lwip_eth_send(struct netif *netif, struct pbuf *p)
 static void tx_done(void *cookie)
 {
     state_t *state = cookie;
-    ring_t tx_avail = state->tx->available;
+    ring_t *tx_avail = state->tx_avail;
 
-    while((tx_avail.write_idx - tx_avail.read_idx) % RING_SIZE) {
-        ethernet_buffer_t *buffer = state->tx_queue_data[tx_avail.read_idx % RING_SIZE];
-        state->tx_queue_data[tx_avail.read_idx % RING_SIZE] = NULL;
+    while((tx_avail->write_idx - tx_avail->read_idx) % RING_SIZE) {
+        ethernet_buffer_t *buffer = state->tx_queue_data[tx_avail->read_idx % RING_SIZE];
+        state->tx_queue_data[tx_avail->read_idx % RING_SIZE] = NULL;
 
         THREAD_MEMORY_RELEASE();
-        tx_avail.read_idx++;
+        tx_avail->read_idx++;
 
         /* return buffer to unused queue. */
         mark_buffer_unused(state, buffer);
@@ -347,7 +348,7 @@ static err_t ethernet_init(struct netif *netif)
     return ERR_OK;
 }
 
-static void client_init_tx(state_t *data, void *tx_dataport_buf, register_cb_fn reg_tx)
+static void client_init_tx(state_t *data, void *tx_available, void *tx_used, register_cb_fn reg_tx)
 {
     int error = reg_tx(tx_done, data);
     if (error) {
@@ -356,15 +357,8 @@ static void client_init_tx(state_t *data, void *tx_dataport_buf, register_cb_fn 
 
     reg_tx_cb = reg_tx;
 
-    data->tx = (dataport_t *)tx_dataport_buf;
-
-    ring_t tx_avail = data->tx->available;
-    tx_avail.write_idx = 0;
-    tx_avail.read_idx = 0;
-
-    ring_t tx_used = data->tx->used;
-    tx_used.write_idx = 0;
-    tx_used.read_idx = 0;
+    data->tx_avail = (ring_t *)tx_available;
+    data->tx_used = (ring_t *)tx_used;
 
     /* Allocate tx rings */
     data->num_available_tx = 0;
@@ -394,7 +388,7 @@ static void client_init_tx(state_t *data, void *tx_dataport_buf, register_cb_fn 
     }
 }
 
-static void client_init_rx(state_t *state, void *rx_dataport_buf, register_cb_fn reg_rx)
+static void client_init_rx(state_t *state, void *rx_available, void *rx_used, register_cb_fn reg_rx)
 {
     int error = reg_rx(rx_queue, state);
     if (error) {
@@ -403,11 +397,12 @@ static void client_init_rx(state_t *state, void *rx_dataport_buf, register_cb_fn
 
     reg_rx_cb = reg_rx;
 
-    state->rx = (dataport_t *)rx_dataport_buf;
+    ring_t *rx_avail = (ring_t *)rx_available;
+    state->rx_avail = rx_avail;
+    state->rx_used = (ring_t *)rx_used;
 
-    ring_t rx_avail = state->rx->available;
-    rx_avail.write_idx = 0;
-    rx_avail.read_idx = 0;
+    rx_avail->write_idx = 0;
+    rx_avail->read_idx = 0;
 
     /* Pre allocate buffers */  
     for (int i = 0; i < NUM_BUFFERS - 1; i++) {
@@ -433,20 +428,21 @@ static void client_init_rx(state_t *state, void *rx_dataport_buf, register_cb_fn
             .in_async_use = false,
         };
 
-        rx_avail.buffer[rx_avail.write_idx % RING_SIZE] = (void *)buffer->dma_addr;
-        rx_avail.buffer[rx_avail.write_idx % RING_SIZE] = buffer->size;
+        rx_avail->buffer[rx_avail->write_idx % RING_SIZE] = (void *)buffer->dma_addr;
+        rx_avail->buffer[rx_avail->write_idx % RING_SIZE] = buffer->size;
 
-        state->rx_queue_data[rx_avail.write_idx % RING_SIZE] = buffer;
+        state->rx_queue_data[rx_avail->write_idx % RING_SIZE] = buffer;
         THREAD_MEMORY_RELEASE();
-        rx_avail.write_idx += 1;
+        rx_avail->write_idx += 1;
     }
 
-    ZF_LOGW("Rx_avail.write_idx = %" PRIu32 "", rx_avail.write_idx);
-
+    ZF_LOGW("First encoded dma buffer addr = %p", rx_avail->buffer[0]);
+    ZF_LOGW("Rx_avail->write_idx = %" PRIu32 ", read idx = %" PRIu32 "", rx_avail->write_idx, rx_avail->read_idx);
 }
 
 int lwip_ethernet_async_client_init(ps_io_ops_t *io_ops, get_mac_client_fn_t get_mac, void **cookie, 
-                void *rx_dataport_buf, void *tx_dataport_buf, register_cb_fn reg_rx_cb, register_cb_fn reg_tx_cb, 
+                void *rx_available, void *rx_used, void *tx_available, void *tx_used, 
+                register_cb_fn reg_rx_cb, register_cb_fn reg_tx_cb, 
                 notify_fn rx_notify, notify_fn tx_notify)
 {
     ZF_LOGW("HELLO client\n");
@@ -479,11 +475,11 @@ int lwip_ethernet_async_client_init(ps_io_ops_t *io_ops, get_mac_client_fn_t get
     data->server_rx_notify = rx_notify;
     data->server_tx_notify = tx_notify;
 
-    client_init_rx(data, rx_dataport_buf, reg_rx_cb);
-    ZF_LOGW("Rx avail write_idx = %" PRIu32 "", data->rx->available.write_idx);
+    client_init_rx(data, rx_available, rx_used, reg_rx_cb);
+    ZF_LOGW("Rx avail write_idx = %" PRIu32 "", data->rx_avail->write_idx);
 
-    client_init_tx(data, tx_dataport_buf, reg_tx_cb);
-    ZF_LOGW("tx avail write_idx = %" PRIu32 "\n", data->tx->available.write_idx);
+    client_init_tx(data, tx_available, tx_used, reg_tx_cb);
+    ZF_LOGW("tx avail write_idx = %" PRIu32 "\n", data->tx_avail->write_idx);
 
     LWIP_MEMPOOL_INIT(RX_POOL);
 

@@ -39,10 +39,12 @@ typedef int (*register_cb_fn)(void (*cb)(void*), void *arg);
 typedef void (*notify_fn)(void);
 
 int lwip_ethernet_async_client_init(ps_io_ops_t *io_ops, get_mac_client_fn_t get_mac, void **cookie, 
-                void *rx_dataport_buf, void *tx_dataport_buf, register_cb_fn reg_rx_cb, register_cb_fn reg_tx_cb, 
+                void *rx_available, void *rx_used, void *tx_available, void *tx_used, 
+                register_cb_fn reg_rx_cb, register_cb_fn reg_tx_cb, 
                 notify_fn rx_notify, notify_fn tx_notify);
 
 
 int lwip_ethernet_async_server_init(ps_io_ops_t *io_ops, register_get_mac_server_fn register_get_mac_fn,
-                void *rx_dataport_buf, void *tx_dataport_buf, register_cb_fn reg_rx_cb, register_cb_fn reg_tx_cb, 
+                void *rx_available, void *rx_used, void *tx_available, void *tx_used, 
+                register_cb_fn reg_rx_cb, register_cb_fn reg_tx_cb, 
                 notify_fn rx_notify, notify_fn tx_notify);

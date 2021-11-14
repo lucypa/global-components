@@ -16,7 +16,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define RING_SIZE 127
+#define RING_SIZE 255
 #define BUFFER_SIZE 2048
 
 typedef struct ring {
@@ -26,10 +26,6 @@ typedef struct ring {
     uint32_t read_idx;
 } ring_t;
 
-typedef struct dataport {
-    ring_t available;
-    ring_t used;
-} dataport_t;
 
 /* the reader always and only  modifies the read index, the writer the write index.  
 Reads/writes of a small integer are atomic.

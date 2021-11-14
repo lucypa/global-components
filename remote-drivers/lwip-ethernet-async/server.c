@@ -43,8 +43,10 @@ typedef struct data {
     ps_io_ops_t *io_ops;
 
     /* Pointers to shared buffers */
-    dataport_t *tx;
-    dataport_t *rx;
+    ring_t *rx_avail;
+    ring_t *rx_used;
+    ring_t *tx_avail;
+    ring_t *tx_used;
 
     notify_fn client_rx_notify;
     notify_fn client_tx_notify;
@@ -56,16 +58,15 @@ static register_cb_fn reg_tx_cb;
 static void eth_tx_complete(void *iface, void *cookie)
 {   
     server_data_t *state = iface;
-    ring_t tx_avail = state->tx->available;
+    ring_t *tx_avail = state->tx_avail;
 
-    if ((tx_avail.write_idx - tx_avail.read_idx + 1) % RING_SIZE) {
+    if ((tx_avail->write_idx - tx_avail->read_idx + 1) % RING_SIZE) {
         ZF_LOGF("lwip_eth_send: Error while enqueuing available buffer, tx available queue full");
     } else {
-        tx_avail.buffer[tx_avail.write_idx % RING_SIZE] = cookie;
+        tx_avail->buffer[tx_avail->write_idx % RING_SIZE] = cookie;
         THREAD_MEMORY_RELEASE();
-        tx_avail.write_idx++;
+        tx_avail->write_idx++;
         /* notify client */
-        ZF_LOGW("Does this happen?");
         state->client_tx_notify();
     }
 }
@@ -77,19 +78,20 @@ static uintptr_t eth_allocate_rx_buf(void *iface, size_t buf_size, void **cookie
     }
     server_data_t *state = iface;
 
-    ring_t rx_avail = state->rx->available;
+    ring_t *rx_avail = state->rx_avail;
  
     /* Try to grab a buffer from the available ring */
-    if (!(rx_avail.write_idx - rx_avail.read_idx % RING_SIZE)) {
-        ZF_LOGW("rx_avail write idx = %d, rx_avail read idx = %d", rx_avail.write_idx, rx_avail.read_idx);
-        ZF_LOGF("RX Available ring is empty. No more buffers available");
+    if (!(rx_avail->write_idx - rx_avail->read_idx % RING_SIZE)) {
+        ZF_LOGW("rx_avail write idx = %d, rx_avail read idx = %d", rx_avail->write_idx, rx_avail->read_idx);
+        ZF_LOGE("RX Available ring is empty. No more buffers available");
         return 0;
     }
 
-    void *buffer = rx_avail.buffer[rx_avail.read_idx % RING_SIZE];
+    void *buffer = rx_avail->buffer[rx_avail->read_idx % RING_SIZE];
+    ZF_LOGW("rx_avail read idx = %" PRIu32 ", encoded buffer = %p", rx_avail->read_idx, buffer);
     *cookie = buffer; 
     COMPILER_MEMORY_RELEASE();
-    rx_avail.read_idx++;
+    rx_avail->read_idx++;
 
     ZF_LOGF_IF(buffer == NULL, "Encoded DMA buffer is NULL");
     void *decoded_buf = DECODE_DMA_ADDRESS(buffer);
@@ -104,15 +106,15 @@ static uintptr_t eth_allocate_rx_buf(void *iface, size_t buf_size, void **cookie
 static int eth_rx_complete(void *iface, unsigned int num_bufs, void **cookies, unsigned int *lens)
 {
     server_data_t *state = iface;
-    ring_t rx_used = state->rx->used;
+    ring_t *rx_used = state->rx_used;
 
     for (int i = 0; i < num_bufs; i++) {
         /* Add buffers to used rx ring. */
-        if (!(rx_used.write_idx - rx_used.read_idx + 1) % RING_SIZE) {
-            rx_used.buffer[rx_used.write_idx % RING_SIZE] = cookies[i];
-            rx_used.buffer[rx_used.write_idx % RING_SIZE] = lens[i];
+        if (!(rx_used->write_idx - rx_used->read_idx + 1) % RING_SIZE) {
+            rx_used->buffer[rx_used->write_idx % RING_SIZE] = cookies[i];
+            rx_used->buffer[rx_used->write_idx % RING_SIZE] = lens[i];
             THREAD_MEMORY_RELEASE();
-            rx_used.write_idx++;
+            rx_used->write_idx++;
         } else {
             ZF_LOGE("Queue is full. Disabling RX IRQs.");
             /* inform driver to disable RX IRQs */
@@ -138,13 +140,13 @@ static struct raw_iface_callbacks ethdriver_callbacks = {
 static void tx_send(void *cookie)
 {
     server_data_t *state = cookie;
-    ring_t tx_used = state->tx->used;
+    ring_t *tx_used = state->tx_used;
     /* Grab buffers from used tx ring */
-    while (tx_used.write_idx - tx_used.read_idx % RING_SIZE) {
-        void *buffer = tx_used.buffer[tx_used.read_idx % RING_SIZE];
-        size_t len = tx_used.len[tx_used.read_idx % RING_SIZE];
+    while (tx_used->write_idx - tx_used->read_idx % RING_SIZE) {
+        void *buffer = tx_used->buffer[tx_used->read_idx % RING_SIZE];
+        size_t len = tx_used->len[tx_used->read_idx % RING_SIZE];
         THREAD_MEMORY_RELEASE();
-        tx_used.read_idx++;
+        tx_used->read_idx++;
 
         void *decoded_buf = DECODE_DMA_ADDRESS(buffer);
         ZF_LOGF_IF(decoded_buf == NULL, "Decoded DMA buffer is NULL");
@@ -183,30 +185,33 @@ static int hardware_interface_searcher(void *cookie, void *interface_instance, c
     return PS_INTERFACE_FOUND_MATCH;
 }
 
-static void server_init_tx(server_data_t *state, void *tx_dataport_buf, register_cb_fn reg_tx)
+static void server_init_tx(server_data_t *state, void *tx_available, void *tx_used, register_cb_fn reg_tx)
 {
     int error = reg_tx(tx_send, state);
     if (error) {
         ZF_LOGE("Unable to register handler");
     }
 
-    state->tx = (dataport_t *)tx_dataport_buf;
+    state->tx_avail = (ring_t *)tx_available;
+    state->tx_used = (ring_t *)tx_used;
     
     reg_tx_cb = reg_tx;
 }
 
-static void server_init_rx(server_data_t *state, void *rx_dataport_buf, register_cb_fn reg_rx)
+static void server_init_rx(server_data_t *state, void *rx_available, void *rx_used, register_cb_fn reg_rx)
 {
     ZF_LOGW("server_init_rx");
-    state->rx = (dataport_t *)rx_dataport_buf;
-    // ZF_LOGW("Rx available write_idx = %d, read_idx = %d\n", state->rx->available->write_idx, state->rx->available->read_idx);
+    state->rx_avail = (ring_t *)rx_available;
+    state->rx_used = (ring_t *)rx_used;
+    ZF_LOGW("Rx available write_idx = %" PRIu32 ", read_idx = %" PRIu32 "\n", state->rx_avail->write_idx, state->rx_avail->read_idx);
     
     // TODO: set up notification channel from client to server when rx_queue is empty. 
 
 }
 
 int lwip_ethernet_async_server_init(ps_io_ops_t *io_ops, register_get_mac_server_fn register_get_mac_fn,
-                void *rx_dataport_buf, void *tx_dataport_buf, register_cb_fn reg_rx_cb, register_cb_fn reg_tx_cb, 
+                void *rx_available, void *rx_used, void *tx_available, void *tx_used, 
+                register_cb_fn reg_rx_cb, register_cb_fn reg_tx_cb, 
                 notify_fn rx_notify, notify_fn tx_notify)
 {
     ZF_LOGW("HELLO server\n"); 
@@ -215,8 +220,8 @@ int lwip_ethernet_async_server_init(ps_io_ops_t *io_ops, register_get_mac_server
     ZF_LOGF_IF(error, "Failed to calloc server data");
     data->io_ops = io_ops;
 
-    server_init_rx(data, rx_dataport_buf, reg_rx_cb);
-    server_init_tx(data, tx_dataport_buf, reg_tx_cb);
+    server_init_rx(data, rx_available, rx_used, reg_rx_cb);
+    server_init_tx(data, tx_available, tx_used, reg_tx_cb);
 
     data->client_rx_notify = rx_notify;
     data->client_tx_notify = tx_notify;
