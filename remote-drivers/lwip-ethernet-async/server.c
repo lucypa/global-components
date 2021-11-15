@@ -81,14 +81,14 @@ static uintptr_t eth_allocate_rx_buf(void *iface, size_t buf_size, void **cookie
     ring_t *rx_avail = state->rx_avail;
  
     /* Try to grab a buffer from the available ring */
-    if (!(rx_avail->write_idx - rx_avail->read_idx % RING_SIZE)) {
+    if (!((rx_avail->write_idx - rx_avail->read_idx) % RING_SIZE)) {
         ZF_LOGW("rx_avail write idx = %d, rx_avail read idx = %d", rx_avail->write_idx, rx_avail->read_idx);
         ZF_LOGE("RX Available ring is empty. No more buffers available");
         return 0;
     }
 
     void *buffer = rx_avail->buffer[rx_avail->read_idx % RING_SIZE];
-    ZF_LOGW("rx_avail read idx = %" PRIu32 ", encoded buffer = %p", rx_avail->read_idx, buffer);
+    ZF_LOGW("rx_avail read idx = %" PRIu32 ", encoded buffer = %"PRIu64"", rx_avail->read_idx, buffer);
     *cookie = buffer; 
     COMPILER_MEMORY_RELEASE();
     rx_avail->read_idx++;
@@ -142,7 +142,7 @@ static void tx_send(void *cookie)
     server_data_t *state = cookie;
     ring_t *tx_used = state->tx_used;
     /* Grab buffers from used tx ring */
-    while (tx_used->write_idx - tx_used->read_idx % RING_SIZE) {
+    while ((tx_used->write_idx - tx_used->read_idx) % RING_SIZE) {
         void *buffer = tx_used->buffer[tx_used->read_idx % RING_SIZE];
         size_t len = tx_used->len[tx_used->read_idx % RING_SIZE];
         THREAD_MEMORY_RELEASE();

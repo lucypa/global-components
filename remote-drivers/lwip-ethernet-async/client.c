@@ -428,7 +428,7 @@ static void client_init_rx(state_t *state, void *rx_available, void *rx_used, re
             .in_async_use = false,
         };
 
-        rx_avail->buffer[rx_avail->write_idx % RING_SIZE] = (void *)buffer->dma_addr;
+        rx_avail->buffer[rx_avail->write_idx % RING_SIZE] = 0xff;//(void *)buffer->dma_addr;
         rx_avail->buffer[rx_avail->write_idx % RING_SIZE] = buffer->size;
 
         state->rx_queue_data[rx_avail->write_idx % RING_SIZE] = buffer;
@@ -436,7 +436,7 @@ static void client_init_rx(state_t *state, void *rx_available, void *rx_used, re
         rx_avail->write_idx += 1;
     }
 
-    ZF_LOGW("First encoded dma buffer addr = %p", rx_avail->buffer[0]);
+    ZF_LOGW("First encoded dma buffer addr = %" PRIu64 "", rx_avail->buffer[0]);
     ZF_LOGW("Rx_avail->write_idx = %" PRIu32 ", read idx = %" PRIu32 "", rx_avail->write_idx, rx_avail->read_idx);
 }
 

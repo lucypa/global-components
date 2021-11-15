@@ -16,7 +16,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define RING_SIZE 255
+#define RING_SIZE 128
 #define BUFFER_SIZE 2048
 
 typedef struct ring {
