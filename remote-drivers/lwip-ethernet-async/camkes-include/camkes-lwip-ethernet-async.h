@@ -50,10 +50,10 @@ import <lwip-ethernet-async.camkes>;
 #define lwip_ethernet_async_connections(name, client, driver) \
     connection seL4RPCNoThreads name##_eth_driver_conn(from client.name##_control, to driver.name##_control); \
     connection seL4Notification init_done(from client.s, to driver.s); \
-    connection seL4SharedData d1(from client.rx_avail, to driver.rx_avail); \
-    connection seL4SharedData d2(from client.rx_used, to driver.rx_used); \
-    connection seL4SharedData d3(from client.tx_avail, to driver.tx_avail); \
-    connection seL4SharedData d4(from client.tx_used, to driver.tx_used); \
+    connection seL4SharedData rx_avail(from client.rx_avail, to driver.rx_avail); \
+    connection seL4SharedData rx_used(from client.rx_used, to driver.rx_used); \
+    connection seL4SharedData tx_avail(from client.tx_avail, to driver.tx_avail); \
+    connection seL4SharedData tx_used(from client.tx_used, to driver.tx_used); \
     connection seL4Notification tx_ready(from client.tx_ready, to driver.tx_ready); \
     connection seL4Notification rx_done(from driver.rx_done, to client.rx_done); \
     connection seL4Notification tx_done(from driver.tx_done, to client.tx_done); \

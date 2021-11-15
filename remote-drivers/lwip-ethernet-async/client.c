@@ -31,7 +31,7 @@
 
 #define LINK_SPEED 1000000000 // Gigabit
 #define ETHER_MTU 1500
-#define NUM_BUFFERS 255
+#define NUM_BUFFERS 128
 
 /*
  * These structures track the buffers used to construct packets
@@ -428,16 +428,14 @@ static void client_init_rx(state_t *state, void *rx_available, void *rx_used, re
             .in_async_use = false,
         };
 
-        rx_avail->buffer[rx_avail->write_idx % RING_SIZE] = 0xff;//(void *)buffer->dma_addr;
-        rx_avail->buffer[rx_avail->write_idx % RING_SIZE] = buffer->size;
+        rx_avail->buffer[rx_avail->write_idx % RING_SIZE] = (void *)buffer->dma_addr;
+        rx_avail->len[rx_avail->write_idx % RING_SIZE] = buffer->size;
 
         state->rx_queue_data[rx_avail->write_idx % RING_SIZE] = buffer;
         THREAD_MEMORY_RELEASE();
         rx_avail->write_idx += 1;
     }
 
-    ZF_LOGW("First encoded dma buffer addr = %" PRIu64 "", rx_avail->buffer[0]);
-    ZF_LOGW("Rx_avail->write_idx = %" PRIu32 ", read idx = %" PRIu32 "", rx_avail->write_idx, rx_avail->read_idx);
 }
 
 int lwip_ethernet_async_client_init(ps_io_ops_t *io_ops, get_mac_client_fn_t get_mac, void **cookie, 
@@ -445,7 +443,6 @@ int lwip_ethernet_async_client_init(ps_io_ops_t *io_ops, get_mac_client_fn_t get
                 register_cb_fn reg_rx_cb, register_cb_fn reg_tx_cb, 
                 notify_fn rx_notify, notify_fn tx_notify)
 {
-    ZF_LOGW("HELLO client\n");
     state_t *data;
     int error = ps_calloc(
         &io_ops->malloc_ops,

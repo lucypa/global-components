@@ -88,12 +88,11 @@ static uintptr_t eth_allocate_rx_buf(void *iface, size_t buf_size, void **cookie
     }
 
     void *buffer = rx_avail->buffer[rx_avail->read_idx % RING_SIZE];
-    ZF_LOGW("rx_avail read idx = %" PRIu32 ", encoded buffer = %"PRIu64"", rx_avail->read_idx, buffer);
+    
     *cookie = buffer; 
     COMPILER_MEMORY_RELEASE();
     rx_avail->read_idx++;
 
-    ZF_LOGF_IF(buffer == NULL, "Encoded DMA buffer is NULL");
     void *decoded_buf = DECODE_DMA_ADDRESS(buffer);
     ZF_LOGF_IF(decoded_buf == NULL, "Decoded DMA buffer is NULL");
 
@@ -200,11 +199,9 @@ static void server_init_tx(server_data_t *state, void *tx_available, void *tx_us
 
 static void server_init_rx(server_data_t *state, void *rx_available, void *rx_used, register_cb_fn reg_rx)
 {
-    ZF_LOGW("server_init_rx");
     state->rx_avail = (ring_t *)rx_available;
     state->rx_used = (ring_t *)rx_used;
-    ZF_LOGW("Rx available write_idx = %" PRIu32 ", read_idx = %" PRIu32 "\n", state->rx_avail->write_idx, state->rx_avail->read_idx);
-    
+   
     // TODO: set up notification channel from client to server when rx_queue is empty. 
 
 }
@@ -214,7 +211,6 @@ int lwip_ethernet_async_server_init(ps_io_ops_t *io_ops, register_get_mac_server
                 register_cb_fn reg_rx_cb, register_cb_fn reg_tx_cb, 
                 notify_fn rx_notify, notify_fn tx_notify)
 {
-    ZF_LOGW("HELLO server\n"); 
     server_data_t *data;
     int error = ps_calloc(&io_ops->malloc_ops, 1, sizeof(*data), (void **)&data);
     ZF_LOGF_IF(error, "Failed to calloc server data");
@@ -245,6 +241,5 @@ int lwip_ethernet_async_server_init(ps_io_ops_t *io_ops, register_get_mac_server
 
     register_get_mac_fn(client_get_mac, data);
 
-    ZF_LOGW("Finished lwip_ethernet_async_server_init");
     return 0;
 }

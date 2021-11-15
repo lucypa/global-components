@@ -19,7 +19,7 @@ static void *instance_cookie;
 static int init_client_pre(ps_io_ops_t *io_ops) {
 
     int error = lwip_ethernet_async_client_init(io_ops, /*? connection_name ?*/_control_mac, 
-                    &instance_cookie, &rx_avail, &rx_used, &tx_avail, &tx_used, 
+                    &instance_cookie, rx_avail, rx_used, tx_avail, tx_used, 
                     rx_done_reg_callback, tx_done_reg_callback, NULL, tx_ready_emit);
 
     return error;
