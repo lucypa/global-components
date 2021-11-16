@@ -16,7 +16,10 @@
 #include <stdbool.h>
 #include <sel4/sel4.h>
 
+#include <virtqueue.h>
+#include <camkes/virtqueue.h>
 #include <camkes/dataport.h>
+
 #include <lwip-ethernet-async.h>
 
 #include <lwip/init.h>
@@ -244,7 +247,8 @@ static void rx_queue(void *cookie)
         COMPILER_MEMORY_ACQUIRE();
     }
 
-    reg_rx_cb(rx_queue, cookie);
+    int error = reg_rx_cb(rx_queue, cookie);
+    ZF_LOGF_IF(error, "Unable to register handler");
     // TODO: The queue is empty. Notify the driver to re-enable RX IRQs. 
 }
 
@@ -321,12 +325,14 @@ static void tx_done(void *cookie)
     }
 
     /* re register the notification callback. */
-    reg_tx_cb(tx_done, state);
+    int error = reg_tx_cb(tx_done, state);
+    ZF_LOGF_IF(error, "Unable to register handler");
 }
 
 static err_t ethernet_init(struct netif *netif)
 {
     if (netif->state == NULL) {
+        ZF_LOGE("ERR_ARG");
         return ERR_ARG;
     }
 
@@ -345,6 +351,7 @@ static err_t ethernet_init(struct netif *netif)
     NETIF_INIT_SNMP(netif, snmp_ifType_ethernet_csmacd, LINK_SPEED);
     netif->flags = NETIF_FLAG_BROADCAST | NETIF_FLAG_ETHARP | NETIF_FLAG_LINK_UP | NETIF_FLAG_IGMP;
 
+    ZF_LOGW("ERR_OK");
     return ERR_OK;
 }
 
@@ -430,8 +437,6 @@ static void client_init_rx(state_t *state, void *rx_available, void *rx_used, re
 
         rx_avail->buffer[rx_avail->write_idx % RING_SIZE] = (void *)buffer->dma_addr;
         rx_avail->len[rx_avail->write_idx % RING_SIZE] = buffer->size;
-        
-        //ZF_LOGW("buf: %p, encoded buf: %p", buf, buffer->dma_addr);
 
         state->rx_queue_data[rx_avail->write_idx % RING_SIZE] = buffer; // this needs looking at. 
         THREAD_MEMORY_RELEASE();
@@ -483,16 +488,18 @@ int lwip_ethernet_async_client_init(ps_io_ops_t *io_ops, get_mac_client_fn_t get
 
     /* Set some dummy IP configuration values to get lwIP bootstrapped  */
     struct ip4_addr netmask, ipaddr, gw, multicast;
-    ipaddr_aton("0.0.0.0", &gw);
-    ipaddr_aton("0.0.0.0", &ipaddr);
+    ipaddr_aton("172.16.1.1", &gw);
+    ipaddr_aton("172.16.1.195", &ipaddr);
     ipaddr_aton("0.0.0.0", &multicast);
     ipaddr_aton("255.255.255.0", &netmask);
 
     data->netif.name[0] = 'e';
     data->netif.name[1] = '0';
 
-    netif_add(&data->netif, &ipaddr, &netmask, &gw, data,
-              ethernet_init, ethernet_input);
+    if (!netif_add(&data->netif, &ipaddr, &netmask, &gw, data,
+              ethernet_init, ethernet_input)) {
+        ZF_LOGE("Netif add returned NULL");
+    }
     netif_set_default(&data->netif);
 
     *cookie = data;

@@ -82,7 +82,6 @@ static uintptr_t eth_allocate_rx_buf(void *iface, size_t buf_size, void **cookie
  
     /* Try to grab a buffer from the available ring */
     if (!((rx_avail->write_idx - rx_avail->read_idx) % RING_SIZE)) {
-        ZF_LOGW("rx_avail write idx = %d, rx_avail read idx = %d", rx_avail->write_idx, rx_avail->read_idx);
         ZF_LOGE("RX Available ring is empty. No more buffers available");
         return 0;
     }
@@ -241,6 +240,5 @@ int lwip_ethernet_async_server_init(ps_io_ops_t *io_ops, register_get_mac_server
     data->eth_driver->i_fn.raw_poll(data->eth_driver);
 
     register_get_mac_fn(client_get_mac, data);
-
     return 0;
 }

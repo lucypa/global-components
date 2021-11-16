@@ -63,6 +63,7 @@ static void eth_init_custom_ip(struct netif *netif, const char *ip_addr, const c
 
 static void netif_status_callback(struct netif *netif)
 {
+    ZF_LOGW("Netif status callback");
     if (dhcp_supplied_address(netif)) {
         printf("DHCP request finished, IP address for netif %s is: %s\n",
                netif->name, ip4addr_ntoa(netif_ip4_addr(netif)));
@@ -85,6 +86,8 @@ int init_lwip_post(ps_io_ops_t *io_ops, seL4_Word timer_badge, int (*timer_perio
 {
     timers_initialised = true;
 
+    ZF_LOGW("Init lwip post");
+
     struct netif *netif = netif_find("e0");
     if (netif == NULL) {
         ZF_LOGE("No device registered to call dhcp on or start");
@@ -97,6 +100,7 @@ int init_lwip_post(ps_io_ops_t *io_ops, seL4_Word timer_badge, int (*timer_perio
         eth_init_custom_ip(netif, ip_addr, multicast_addr_);
         netif_set_up(netif);
     } else {
+        ZF_LOGW("No ip addr configured. Getting an IP address from DHCP");
         netif_set_status_callback(netif, netif_status_callback);
         netif_set_up(netif);
         ZF_LOGF_IF(dhcp_start(netif), "Failed to initiate the DHCP negotiation");
