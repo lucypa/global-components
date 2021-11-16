@@ -22,17 +22,17 @@ void default_get_mac(uint8_t *b1, uint8_t *b2, uint8_t *b3, uint8_t *b4, uint8_t
 }
 
 static get_mac_server_fn_t get_mac_dispatch = default_get_mac;
-static void *cookie;
+static void *get_mac_dispatch_cookie;
 
 static void register_get_mac_fn(get_mac_server_fn_t get_mac, void *cookie)
 {
     get_mac_dispatch = get_mac;
-    cookie = cookie;
+    get_mac_dispatch_cookie = cookie;
 }
 
 void /*? configuration[me.parent.name].get('connection_name') ?*/_control_mac(uint8_t *b1, uint8_t *b2, uint8_t *b3, uint8_t *b4, uint8_t *b5, uint8_t *b6) {
     if (get_mac_dispatch) {
-        get_mac_dispatch(b1, b2, b3, b4, b5, b6, cookie);
+        get_mac_dispatch(b1, b2, b3, b4, b5, b6, get_mac_dispatch_cookie);
     } else {
         ZF_LOGE("/*? configuration[me.parent.name].get('connection_name') ?*/_control_mac has been removed on server side");
     }

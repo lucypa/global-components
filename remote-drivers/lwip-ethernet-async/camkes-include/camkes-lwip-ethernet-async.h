@@ -65,4 +65,8 @@ import <lwip-ethernet-async.camkes>;
     name##_dma.size = 0x400000; \
     name##_dma.controller = VAR_STRINGIZE(client.name##_dma_pool); \
     name##_server_init.connection_name = VAR_STRINGIZE(name); \
-    name##_client_init.connection_name = VAR_STRINGIZE(name);
+    name##_client_init.connection_name = VAR_STRINGIZE(name); \
+    rx_avail.size = 0x3000; \
+    rx_used.size = 0x3000; \
+    tx_avail.size = 0x3000; \
+    tx_used.size = 0x3000;

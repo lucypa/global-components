@@ -31,7 +31,7 @@
 
 #define LINK_SPEED 1000000000 // Gigabit
 #define ETHER_MTU 1500
-#define NUM_BUFFERS 128
+#define NUM_BUFFERS 512
 
 /*
  * These structures track the buffers used to construct packets
@@ -284,7 +284,7 @@ static err_t lwip_eth_send(struct netif *netif, struct pbuf *p)
 
     ring_t *tx_used = state->tx_used;
     /* insert into the used tx queue */
-    if ((tx_used->write_idx - tx_used->read_idx + 1) % RING_SIZE) {
+    if (!((tx_used->write_idx - tx_used->read_idx + 1) % RING_SIZE)) {
         ZF_LOGF("lwip_eth_send: Error while enqueuing used buffer, tx used queue full");
         free_buffer(state, buffer);
     } else {
@@ -292,8 +292,8 @@ static err_t lwip_eth_send(struct netif *netif, struct pbuf *p)
         tx_used->len[tx_used->write_idx % RING_SIZE] = copied;
         
         state->tx_queue_data[tx_used->write_idx % RING_SIZE] = buffer;
-        THREAD_MEMORY_RELEASE();
         tx_used->write_idx++;
+        THREAD_MEMORY_RELEASE();
         /* notify the server */
         state->server_tx_notify();
     }
@@ -316,7 +316,7 @@ static void tx_done(void *cookie)
 
         /* return buffer to unused queue. */
         mark_buffer_unused(state, buffer);
-
+        // DOES THIS NEED TO BE HERE?
         COMPILER_MEMORY_ACQUIRE();
     }
 
@@ -430,8 +430,10 @@ static void client_init_rx(state_t *state, void *rx_available, void *rx_used, re
 
         rx_avail->buffer[rx_avail->write_idx % RING_SIZE] = (void *)buffer->dma_addr;
         rx_avail->len[rx_avail->write_idx % RING_SIZE] = buffer->size;
+        
+        //ZF_LOGW("buf: %p, encoded buf: %p", buf, buffer->dma_addr);
 
-        state->rx_queue_data[rx_avail->write_idx % RING_SIZE] = buffer;
+        state->rx_queue_data[rx_avail->write_idx % RING_SIZE] = buffer; // this needs looking at. 
         THREAD_MEMORY_RELEASE();
         rx_avail->write_idx += 1;
     }
@@ -473,10 +475,7 @@ int lwip_ethernet_async_client_init(ps_io_ops_t *io_ops, get_mac_client_fn_t get
     data->server_tx_notify = tx_notify;
 
     client_init_rx(data, rx_available, rx_used, reg_rx_cb);
-    ZF_LOGW("Rx avail write_idx = %" PRIu32 "", data->rx_avail->write_idx);
-
     client_init_tx(data, tx_available, tx_used, reg_tx_cb);
-    ZF_LOGW("tx avail write_idx = %" PRIu32 "\n", data->tx_avail->write_idx);
 
     LWIP_MEMPOOL_INIT(RX_POOL);
 
@@ -497,8 +496,6 @@ int lwip_ethernet_async_client_init(ps_io_ops_t *io_ops, get_mac_client_fn_t get
     netif_set_default(&data->netif);
 
     *cookie = data;
-  
-    ZF_LOGW("Finished lwip_ethernet_async_client_init");
 
     return 0;    
 }

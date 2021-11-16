@@ -60,12 +60,12 @@ static void eth_tx_complete(void *iface, void *cookie)
     server_data_t *state = iface;
     ring_t *tx_avail = state->tx_avail;
 
-    if ((tx_avail->write_idx - tx_avail->read_idx + 1) % RING_SIZE) {
+    if (!((tx_avail->write_idx - tx_avail->read_idx + 1) % RING_SIZE)) {
         ZF_LOGF("lwip_eth_send: Error while enqueuing available buffer, tx available queue full");
     } else {
         tx_avail->buffer[tx_avail->write_idx % RING_SIZE] = cookie;
-        THREAD_MEMORY_RELEASE();
         tx_avail->write_idx++;
+        THREAD_MEMORY_RELEASE();
         /* notify client */
         state->client_tx_notify();
     }
@@ -90,11 +90,12 @@ static uintptr_t eth_allocate_rx_buf(void *iface, size_t buf_size, void **cookie
     void *buffer = rx_avail->buffer[rx_avail->read_idx % RING_SIZE];
     
     *cookie = buffer; 
-    COMPILER_MEMORY_RELEASE();
+    THREAD_MEMORY_RELEASE();
     rx_avail->read_idx++;
 
     void *decoded_buf = DECODE_DMA_ADDRESS(buffer);
     ZF_LOGF_IF(decoded_buf == NULL, "Decoded DMA buffer is NULL");
+    //ZF_LOGW("decoded buf: %p, encoded buffer: %p", decoded_buf, buffer);
 
     /* Invalidate the memory */
     ps_dma_cache_invalidate(&state->io_ops->dma_manager, decoded_buf, buf_size);
@@ -106,10 +107,10 @@ static int eth_rx_complete(void *iface, unsigned int num_bufs, void **cookies, u
 {
     server_data_t *state = iface;
     ring_t *rx_used = state->rx_used;
-
+    
     for (int i = 0; i < num_bufs; i++) {
         /* Add buffers to used rx ring. */
-        if (!(rx_used->write_idx - rx_used->read_idx + 1) % RING_SIZE) {
+        if ((rx_used->write_idx - rx_used->read_idx + 1) % RING_SIZE) {
             rx_used->buffer[rx_used->write_idx % RING_SIZE] = cookies[i];
             rx_used->buffer[rx_used->write_idx % RING_SIZE] = lens[i];
             THREAD_MEMORY_RELEASE();
