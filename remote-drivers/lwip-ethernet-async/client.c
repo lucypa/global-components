@@ -16,10 +16,8 @@
 #include <stdbool.h>
 #include <sel4/sel4.h>
 
-#include <virtqueue.h>
-#include <camkes/virtqueue.h>
-#include <camkes/dataport.h>
 
+#include <camkes/dataport.h>
 #include <lwip-ethernet-async.h>
 
 #include <lwip/init.h>
@@ -312,6 +310,7 @@ static err_t lwip_eth_send(struct netif *netif, struct pbuf *p)
     if (error) {
         ZF_LOGF("lwip_eth_send: Error while enqueuing used buffer, tx used queue full");
         free_buffer(state, buffer);
+        return ERR_MEM;
     }
 
     /* Notify the server */
@@ -389,8 +388,8 @@ static void client_init_tx(state_t *data, void *tx_available, void *tx_used, reg
         void *buf = ps_dma_alloc(
             &data->io_ops->dma_manager,
             BUFFER_SIZE,
-            64,
-            1,
+            64, /* Align */
+            1, /* Mapped cached */
             PS_MEM_NORMAL
         );
         ZF_LOGF_IF(!buf, "Failed to allocate buffer for pending TX ring.");

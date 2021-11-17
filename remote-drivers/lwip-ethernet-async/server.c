@@ -30,7 +30,6 @@
 #include <lwip-ethernet-async.h>
 
 #include <utils/util.h>
-
 #include <ring.h>
 
 #define BUF_SIZE 2048
