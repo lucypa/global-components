@@ -110,7 +110,6 @@ static int insert_ring(ring_t *ring, uintptr_t buffer, unsigned int len, unsigne
     return -1; 
 }
 
-
 /* Allocate an empty TX buffer from the empty pool */
 static inline ethernet_buffer_t *alloc_tx_buffer(state_t *state, size_t length)
 {   
@@ -331,7 +330,7 @@ static void tx_done(void *cookie)
         ZF_LOGW("returning buffer");
         unsigned int index = tx_avail->buffers[tx_avail->read_idx % RING_SIZE].idx;
         ethernet_buffer_t *buffer = &state->buffer_metadata[index];
-        
+
         /* Little sanity check */
         assert(buffer->dma_addr = tx_avail->buffers[tx_avail->read_idx % RING_SIZE].encoded_addr);
         THREAD_MEMORY_RELEASE();
@@ -350,7 +349,6 @@ static void tx_done(void *cookie)
 static err_t ethernet_init(struct netif *netif)
 {
     if (netif->state == NULL) {
-        ZF_LOGE("ERR_ARG");
         return ERR_ARG;
     }
 
@@ -369,7 +367,7 @@ static err_t ethernet_init(struct netif *netif)
     NETIF_INIT_SNMP(netif, snmp_ifType_ethernet_csmacd, LINK_SPEED);
     netif->flags = NETIF_FLAG_BROADCAST | NETIF_FLAG_ETHARP | NETIF_FLAG_LINK_UP | NETIF_FLAG_IGMP;
 
-    ZF_LOGW("ERR_OK");
+    ZF_LOGW("Ethernet initialised");
     return ERR_OK;
 }
 

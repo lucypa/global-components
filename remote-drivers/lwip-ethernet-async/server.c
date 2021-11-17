@@ -85,8 +85,8 @@ static void eth_tx_complete(void *iface, void *cookie)
 
     buff_desc_t *desc = cookie;
     checksum((void *)DECODE_DMA_ADDRESS(desc->encoded_addr), desc->len);
-    int err = insert_ring(state->tx_avail, desc->encoded_addr, desc->len, desc->idx);
 
+    int err = insert_ring(state->tx_avail, desc->encoded_addr, desc->len, desc->idx);
     ZF_LOGF_IF(err, "lwip_eth_send: Error while enqueuing available buffer, tx available queue full");
 
     /* notify client */
@@ -107,8 +107,7 @@ static uintptr_t eth_allocate_rx_buf(void *iface, size_t buf_size, void **cookie
         return 0;
     }
 
-    void *buffer = rx_avail->buffers[rx_avail->read_idx % RING_SIZE].encoded_addr;
-    
+    void *buffer = rx_avail->buffers[rx_avail->read_idx % RING_SIZE].encoded_addr;    
     *cookie = &rx_avail->buffers[rx_avail->read_idx % RING_SIZE]; 
     THREAD_MEMORY_RELEASE();
     rx_avail->read_idx++;
@@ -119,6 +118,9 @@ static uintptr_t eth_allocate_rx_buf(void *iface, size_t buf_size, void **cookie
     /* Invalidate the memory */
     ps_dma_cache_invalidate(&state->io_ops->dma_manager, decoded_buf, buf_size);
     uintptr_t phys = ps_dma_pin(&state->io_ops->dma_manager, decoded_buf, buf_size);
+
+    ZF_LOGW("phys: %p", phys);
+
     return phys;
 }
 
@@ -173,6 +175,7 @@ static void tx_send(void *cookie)
         ps_dma_cache_clean(&state->io_ops->dma_manager, decoded_buf, len);
 
         checksum(decoded_buf, len);
+        ZF_LOGW("phys: %p", phys);
         // TODO: THIS CAN'T HANDLE CHAINED BUFFERS.
         int err = state->eth_driver->i_fn.raw_tx(state->eth_driver, 1, &phys, &len, cookie);
         if (err != ETHIF_TX_ENQUEUED) {
