@@ -10,6 +10,7 @@
  * @TAG(DATA61_BSD)
  */
 
+/* This needs to be here for the mac procedure */
 import <VirtQueue/VirtQueue.camkes>;
 
 procedure lwip_ethernet_async_control {

@@ -19,9 +19,14 @@
 #define RING_SIZE 512
 #define BUFFER_SIZE 2048
 
+typedef struct buff_desc {
+    uintptr_t encoded_addr; /* encoded dma addresses */
+    unsigned int len; /* associated memory lengths */
+    unsigned int idx; /* index into client side metadata */
+} buff_desc_t;
+
 typedef struct ring {
-    uintptr_t buffer[RING_SIZE]; /* encoded dma addresses */
-    size_t len[RING_SIZE]; /* associated memory lengths */
+    buff_desc_t buffers[RING_SIZE]; 
     uint32_t write_idx;
     uint32_t read_idx;
 } ring_t;
