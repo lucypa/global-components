@@ -33,7 +33,9 @@
 #include <ring.h>
 
 #define BUF_SIZE 2048
-#define ERR_QUEUE_FULL 1
+#define RING_DEQUEUED 1
+#define RING_ERR -1
+
 
 typedef struct data {
     struct eth_driver *eth_driver;
@@ -61,7 +63,8 @@ static void checksum(unsigned char *buffer, unsigned int len) {
     printf("check sum = %zu\n", csum);
 }
 
-static int insert_ring(ring_t *ring, uintptr_t buffer, unsigned int len, unsigned int index)
+
+static inline int ring_enqueue(ring_t *ring, uintptr_t buffer, unsigned int len, unsigned int index)
 {
     if ((ring->write_idx - ring->read_idx + 1) % RING_SIZE) {
         ring->buffers[ring->write_idx % RING_SIZE].encoded_addr = buffer;
@@ -73,7 +76,25 @@ static int insert_ring(ring_t *ring, uintptr_t buffer, unsigned int len, unsigne
     }
 
     ZF_LOGE("Ring full");
-    return -1; 
+    return RING_ERR; 
+}
+
+/* Returns 0 if ring is empty. 1 otherwise. */
+static int ring_dequeue(ring_t *ring, uintptr_t *addr, unsigned int *len, void **cookie)
+{
+    if (!((ring->write_idx - ring->read_idx) % RING_SIZE)) {
+        ZF_LOGE("Ring is empty");
+        return 0;
+    }
+
+    *addr = ring->buffers[ring->read_idx % RING_SIZE].encoded_addr;
+    *len = ring->buffers[ring->read_idx % RING_SIZE].len;
+    *cookie = &ring->buffers[ring->read_idx % RING_SIZE];
+
+    THREAD_MEMORY_RELEASE();
+    ring->read_idx++;
+
+    return RING_DEQUEUED;
 }
 
 /* Packets have been transferred or dropped. */
@@ -85,7 +106,7 @@ static void eth_tx_complete(void *iface, void *cookie)
     buff_desc_t *desc = cookie;
     checksum((void *)DECODE_DMA_ADDRESS(desc->encoded_addr), desc->len);
 
-    int err = insert_ring(state->tx_avail, desc->encoded_addr, desc->len, desc->idx);
+    int err = ring_enqueue(state->tx_avail, desc->encoded_addr, desc->len, desc->idx);
     ZF_LOGF_IF(err, "lwip_eth_send: Error while enqueuing available buffer, tx available queue full");
 
     /* notify client */
@@ -98,20 +119,17 @@ static uintptr_t eth_allocate_rx_buf(void *iface, size_t buf_size, void **cookie
         return 0;
     }
     server_data_t *state = iface;
-    ring_t *rx_avail = state->rx_avail;
- 
+
+    uintptr_t addr;
+    unsigned int len;
+
     /* Try to grab a buffer from the available ring */
-    if (!((rx_avail->write_idx - rx_avail->read_idx) % RING_SIZE)) {
+    if (!ring_dequeue(state->rx_avail, &addr, &len, cookie)) {
         ZF_LOGE("RX Available ring is empty. No more buffers available");
         return 0;
     }
 
-    void *buffer = rx_avail->buffers[rx_avail->read_idx % RING_SIZE].encoded_addr;    
-    *cookie = &rx_avail->buffers[rx_avail->read_idx % RING_SIZE]; 
-    THREAD_MEMORY_RELEASE();
-    rx_avail->read_idx++;
-
-    void *decoded_buf = DECODE_DMA_ADDRESS(buffer);
+    void *decoded_buf = DECODE_DMA_ADDRESS(addr);
     ZF_LOGF_IF(decoded_buf == NULL, "Decoded DMA buffer is NULL");
 
     /* Invalidate the memory */
@@ -123,7 +141,7 @@ static uintptr_t eth_allocate_rx_buf(void *iface, size_t buf_size, void **cookie
     return phys;
 }
 
-static int eth_rx_complete(void *iface, unsigned int num_bufs, void **cookies, unsigned int *lens)
+static void eth_rx_complete(void *iface, unsigned int num_bufs, void **cookies, unsigned int *lens)
 {
     server_data_t *state = iface;
     ring_t *rx_used = state->rx_used;
@@ -131,19 +149,16 @@ static int eth_rx_complete(void *iface, unsigned int num_bufs, void **cookies, u
     for (int i = 0; i < num_bufs; i++) {
         /* Add buffers to used rx ring. */
         buff_desc_t *desc = cookies[i];
-        int err = insert_ring(state->rx_used, desc->encoded_addr, lens[i], desc->idx);
+        int err = ring_enqueue(state->rx_used, desc->encoded_addr, lens[i], desc->idx);
 
         if (err) {
             ZF_LOGE("Queue is full. Disabling RX IRQs.");
-            /* inform driver to disable RX IRQs */
-            return ERR_QUEUE_FULL;
+            /* TODO inform driver to disable RX IRQs */
         }
     }
 
     /* Notify the client */
     state->client_rx_notify();
-
-    return 0;
 }
 
 static struct raw_iface_callbacks ethdriver_callbacks = {
@@ -153,20 +168,16 @@ static struct raw_iface_callbacks ethdriver_callbacks = {
 };
 
 /* We have packets that need to be sent */
-static void tx_send(void *cookie)
+static void tx_send(void *iface)
 {
     ZF_LOGW("We have packets that need to be sent");
-    server_data_t *state = cookie;
-    ring_t *tx_used = state->tx_used;
-    /* Grab buffers from used tx ring */
-    while ((tx_used->write_idx - tx_used->read_idx) % RING_SIZE) {
-        // TODO: PUT THIS SOMEWHERE ELSE. 
-        void *buffer = tx_used->buffers[tx_used->read_idx % RING_SIZE].encoded_addr;
-        unsigned int len = tx_used->buffers[tx_used->read_idx % RING_SIZE].len;
-        void *cookie = &tx_used->buffers[tx_used->read_idx % RING_SIZE];
-        THREAD_MEMORY_RELEASE();
-        tx_used->read_idx++;
+    server_data_t *state = iface;
 
+    uintptr_t buffer;
+    unsigned int len;
+    void *cookie;
+
+    while(ring_dequeue(state->tx_used, &buffer, &len, &cookie)) {
         void *decoded_buf = DECODE_DMA_ADDRESS(buffer);
         ZF_LOGF_IF(decoded_buf == NULL, "Decoded DMA buffer is NULL");
 
@@ -178,11 +189,8 @@ static void tx_send(void *cookie)
         // TODO: THIS CAN'T HANDLE CHAINED BUFFERS.
         int err = state->eth_driver->i_fn.raw_tx(state->eth_driver, 1, &phys, &len, cookie);
         if (err != ETHIF_TX_ENQUEUED) {
-            eth_tx_complete(state, buffer);
-        }
-    
-        // DOES THIS NEED TO BE HERE?
-        COMPILER_MEMORY_ACQUIRE();
+            eth_tx_complete(state, cookie);
+        }        
     }
 
     int error = reg_tx_cb(tx_send, state);

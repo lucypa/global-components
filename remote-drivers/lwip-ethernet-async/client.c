@@ -92,7 +92,7 @@ typedef struct state {
 static register_cb_fn reg_rx_cb;
 static register_cb_fn reg_tx_cb;
 
-static int insert_ring(ring_t *ring, uintptr_t buffer, unsigned int len, unsigned int index)
+static inline int ring_enqueue(ring_t *ring, uintptr_t buffer, unsigned int len, unsigned int index)
 {
     if ((ring->write_idx - ring->read_idx + 1) % RING_SIZE) {
         int i = ring->write_idx % RING_SIZE;
@@ -106,6 +106,23 @@ static int insert_ring(ring_t *ring, uintptr_t buffer, unsigned int len, unsigne
 
     ZF_LOGE("Ring full");
     return -1; 
+}
+
+static inline int ring_dequeue(ring_t *ring, uintptr_t *addr, unsigned int *len) 
+{
+    int index = ring->buffers[ring->read_idx % RING_SIZE].idx;
+    *addr = ring->buffers[ring->read_idx % RING_SIZE].encoded_addr;
+    *len = ring->buffers[ring->read_idx % RING_SIZE].len;
+
+    THREAD_MEMORY_RELEASE();
+    ring->read_idx++;
+
+    return index;
+}
+
+static inline int ring_not_empty(ring_t *ring) 
+{
+    return ((ring->write_idx - ring->read_idx) % RING_SIZE);
 }
 
 /* Allocate an empty TX buffer from the empty pool */
@@ -145,7 +162,7 @@ static inline void return_buffer(state_t *state, ethernet_buffer_t *buffer)
             ZF_LOGW("Returning RX buffer");
             // As the rx_available ring is the size of the number of buffers we have, 
             // the ring should never be full. 
-            insert_ring(state->rx_avail, buffer->dma_addr, buffer->size, buffer->index);
+            ring_enqueue(state->rx_avail, buffer->dma_addr, buffer->size, buffer->index);
             break;
         }
     }
@@ -231,28 +248,26 @@ static void rx_queue(void *cookie)
 {
     state_t *state = cookie;
     /* get buffers from used RX ring */
-    ring_t *rx_used = state->rx_used;
+    while(ring_not_empty(state->rx_used)) {
+        uintptr_t encoded_addr;
+        unsigned int len;
 
-    while((rx_used->write_idx - rx_used->read_idx) % RING_SIZE) {
-        int index = rx_used->buffers[rx_used->read_idx % RING_SIZE].idx;
+        int index = ring_dequeue(state->rx_used, &encoded_addr, &len);
 
         ethernet_buffer_t *buffer = &state->buffer_metadata[index];
-        assert(buffer->dma_addr = rx_used->buffers[index].encoded_addr);
+
+        /* Little sanity check */
+        assert(buffer->dma_addr = encoded_addr);
         assert(!buffer->allocated);
         buffer->allocated = true;
 
-        THREAD_MEMORY_RELEASE();
-        rx_used->read_idx++;
-
-        struct pbuf *p = create_interface_buffer(state, buffer, buffer->size);
+        struct pbuf *p = create_interface_buffer(state, buffer, len);
 
         if (state->netif.input(p, &state->netif) != ERR_OK) {
             // If it is successfully received, the receiver controls whether or not it gets freed.
             ZF_LOGE("netif.input() != ERR_OK");
             pbuf_free(p);
         }
-
-        COMPILER_MEMORY_ACQUIRE();
     }
 
     int error = reg_rx_cb(rx_queue, cookie);
@@ -304,9 +319,9 @@ static err_t lwip_eth_send(struct netif *netif, struct pbuf *p)
 
     checksum(frame, copied);
     /* insert into the used tx queue */
-    ZF_LOGW("Inserting buffer into tx_used queue");
+    ZF_LOGW("Enqueueing buffer into tx_used ring");
 
-    int error = insert_ring(state->tx_used, (void*)ENCODE_DMA_ADDRESS(frame), copied, buffer->index);
+    int error = ring_enqueue(state->tx_used, (void*)ENCODE_DMA_ADDRESS(frame), copied, buffer->index);
     if (error) {
         ZF_LOGF("lwip_eth_send: Error while enqueuing used buffer, tx used queue full");
         free_buffer(state, buffer);
@@ -323,17 +338,17 @@ static err_t lwip_eth_send(struct netif *netif, struct pbuf *p)
 static void tx_done(void *cookie)
 {
     state_t *state = cookie;
-    ring_t *tx_avail = state->tx_avail;
 
-    while((tx_avail->write_idx - tx_avail->read_idx) % RING_SIZE) {
+    while(ring_not_empty(state->tx_avail)) {
         ZF_LOGW("returning buffer");
-        unsigned int index = tx_avail->buffers[tx_avail->read_idx % RING_SIZE].idx;
+        uintptr_t encoded_addr;
+        unsigned int len;
+
+        int index = ring_dequeue(state->tx_avail, &encoded_addr, &len);
         ethernet_buffer_t *buffer = &state->buffer_metadata[index];
 
         /* Little sanity check */
-        assert(buffer->dma_addr = tx_avail->buffers[tx_avail->read_idx % RING_SIZE].encoded_addr);
-        THREAD_MEMORY_RELEASE();
-        tx_avail->read_idx++;
+        assert(buffer->dma_addr = encoded_addr);
 
         /* return buffer to unused queue. */
         buffer->allocated = false;
@@ -452,7 +467,7 @@ static void client_init_rx(state_t *state, void *rx_available, void *rx_used, re
             .index = i,
         };
 
-        insert_ring(rx_avail, buffer->dma_addr, BUFFER_SIZE, i);
+        ring_enqueue(rx_avail, buffer->dma_addr, BUFFER_SIZE, i);
     }
 
 }
