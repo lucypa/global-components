@@ -19,13 +19,13 @@
 #include <sel4/benchmark_utilisation_types.h>
 #include <camkes/dataport_caps.h>
 #include <string.h>
-#include <sel4/log.h>
-#include <sel4debug/logbuffer.h>
+//#include <sel4/log.h>
+//#include <sel4debug/logbuffer.h>
 #include <sel4/benchmark_track_types.h>
 
-#ifdef CONFIG_BENCHMARK_TRACK_KERNEL_ENTRIES
+/*#ifdef CONFIG_BENCHMARK_TRACK_KERNEL_ENTRIES
 seL4_LogBuffer log_buffer;
-#endif
+#endif*/
 
 #define MAGIC_CYCLES 150
 
@@ -253,10 +253,10 @@ void pre_init(void)
                                              benchmarking_events, 0, n_counters);
                                              
 #ifdef CONFIG_BENCHMARK_TRACK_KERNEL_ENTRIES
-    seL4_CPtr log_cap = dataport_get_nth_frame_cap(&bench_buffer_handle, 0);
+    /*seL4_CPtr log_cap = dataport_get_nth_frame_cap(&bench_buffer_handle, 0);
     seL4_Error sel4_err = seL4_BenchmarkSetLogBuffer(log_cap);
     log_buffer = seL4_LogBuffer_new(bench_buffer);
-    ZF_LOGF_IF(sel4_err != seL4_NoError, "Failed to set log buffer");  
+    ZF_LOGF_IF(sel4_err != seL4_NoError, "Failed to set log buffer");  */
 #endif
 
     int err = bench_to_reg_callback(&count_idle, NULL);
