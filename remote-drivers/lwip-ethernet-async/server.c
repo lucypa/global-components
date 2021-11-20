@@ -55,6 +55,8 @@ typedef struct data {
 
 static register_cb_fn reg_tx_cb;
 
+/* This can be useful as a debugging tool when concerned about packet corruption. */
+/* 
 static void checksum(unsigned char *buffer, unsigned int len) {
     unsigned int csum;
     unsigned char *p;
@@ -62,14 +64,14 @@ static void checksum(unsigned char *buffer, unsigned int len) {
     for (p = buffer, i=len, csum=0; i > 0; csum += *p++, --i);
     printf("check sum = %zu\n", csum);
 }
-
+*/
 
 static inline int ring_enqueue(ring_t *ring, uintptr_t buffer, unsigned int len, unsigned int index)
 {
     if ((ring->write_idx - ring->read_idx + 1) % RING_SIZE) {
         ring->buffers[ring->write_idx % RING_SIZE].encoded_addr = buffer;
         ring->buffers[ring->write_idx % RING_SIZE].len = len;
-        ring->buffers[ring->write_idx & RING_SIZE].idx = index;
+        ring->buffers[ring->write_idx % RING_SIZE].idx = index;
         ring->write_idx++;
         THREAD_MEMORY_RELEASE();
         return 0;
@@ -83,7 +85,7 @@ static inline int ring_enqueue(ring_t *ring, uintptr_t buffer, unsigned int len,
 static int ring_dequeue(ring_t *ring, uintptr_t *addr, unsigned int *len, void **cookie)
 {
     if (!((ring->write_idx - ring->read_idx) % RING_SIZE)) {
-        ZF_LOGE("Ring is empty");
+        ZF_LOGW("Ring is empty");
         return 0;
     }
 
@@ -104,7 +106,6 @@ static void eth_tx_complete(void *iface, void *cookie)
     server_data_t *state = iface;
 
     buff_desc_t *desc = cookie;
-    checksum((void *)DECODE_DMA_ADDRESS(desc->encoded_addr), desc->len);
 
     int err = ring_enqueue(state->tx_avail, desc->encoded_addr, desc->len, desc->idx);
     ZF_LOGF_IF(err, "lwip_eth_send: Error while enqueuing available buffer, tx available queue full");
@@ -129,6 +130,9 @@ static uintptr_t eth_allocate_rx_buf(void *iface, size_t buf_size, void **cookie
         return 0;
     }
 
+    buff_desc_t *desc = *cookie;
+    ZF_LOGW("encoded addr = %p, length = %d, index = %d", desc->encoded_addr, len, desc->idx);
+
     void *decoded_buf = DECODE_DMA_ADDRESS(addr);
     ZF_LOGF_IF(decoded_buf == NULL, "Decoded DMA buffer is NULL");
 
@@ -149,6 +153,7 @@ static void eth_rx_complete(void *iface, unsigned int num_bufs, void **cookies, 
     for (int i = 0; i < num_bufs; i++) {
         /* Add buffers to used rx ring. */
         buff_desc_t *desc = cookies[i];
+        ZF_LOGW("encoded addr = %p, length = %d, index = %d", desc->encoded_addr, lens[i], desc->idx);
         int err = ring_enqueue(state->rx_used, desc->encoded_addr, lens[i], desc->idx);
 
         if (err) {
@@ -184,13 +189,10 @@ static void tx_send(void *iface)
         uintptr_t phys = ps_dma_pin(&state->io_ops->dma_manager, decoded_buf, len);
         ps_dma_cache_clean(&state->io_ops->dma_manager, decoded_buf, len);
 
-        checksum(decoded_buf, len);
-        ZF_LOGW("phys: %p", phys);
-        // TODO: THIS CAN'T HANDLE CHAINED BUFFERS.
         int err = state->eth_driver->i_fn.raw_tx(state->eth_driver, 1, &phys, &len, cookie);
         if (err != ETHIF_TX_ENQUEUED) {
             eth_tx_complete(state, cookie);
-        }        
+        }
     }
 
     int error = reg_tx_cb(tx_send, state);

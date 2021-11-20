@@ -108,9 +108,10 @@ static inline int ring_enqueue(ring_t *ring, uintptr_t buffer, unsigned int len,
     return -1; 
 }
 
-static inline int ring_dequeue(ring_t *ring, uintptr_t *addr, unsigned int *len) 
+/* Returns the index of the buffer in the state->metadata array. */
+static inline unsigned int ring_dequeue(ring_t *ring, uintptr_t *addr, unsigned int *len) 
 {
-    int index = ring->buffers[ring->read_idx % RING_SIZE].idx;
+    unsigned int index = ring->buffers[ring->read_idx % RING_SIZE].idx;
     *addr = ring->buffers[ring->read_idx % RING_SIZE].encoded_addr;
     *len = ring->buffers[ring->read_idx % RING_SIZE].len;
 
@@ -246,20 +247,26 @@ static struct pbuf *create_interface_buffer(state_t *state, ethernet_buffer_t *b
 /* New packets have been received and waiting in the used queue.*/
 static void rx_queue(void *cookie)
 {
+    ZF_LOGW("New packets have been received");
     state_t *state = cookie;
     /* get buffers from used RX ring */
     while(ring_not_empty(state->rx_used)) {
         uintptr_t encoded_addr;
         unsigned int len;
 
-        int index = ring_dequeue(state->rx_used, &encoded_addr, &len);
+        unsigned int index = ring_dequeue(state->rx_used, &encoded_addr, &len);
+        ZF_LOGW("index = %d", index);
 
         ethernet_buffer_t *buffer = &state->buffer_metadata[index];
 
         /* Little sanity check */
-        assert(buffer->dma_addr = encoded_addr);
+        if (buffer->dma_addr != encoded_addr) {
+            ZF_LOGE("buffer->dma_addr != encoded_addr, dma_addr = %p, encoded_addr = %p", buffer->dma_addr, encoded_addr);
+        }
+
         assert(!buffer->allocated);
         buffer->allocated = true;
+        ZF_LOGW("processing packet %p of length %d", buffer->dma_addr, len);
 
         struct pbuf *p = create_interface_buffer(state, buffer, len);
 
@@ -275,13 +282,6 @@ static void rx_queue(void *cookie)
     // TODO: The queue is empty. Notify the driver to re-enable RX IRQs. 
 }
 
-static void checksum(unsigned char *buffer, unsigned int len) {
-    unsigned int csum;
-    unsigned char *p;
-    unsigned int i;
-    for (p = buffer, i=len, csum=0; i > 0; csum += *p++, --i);
-    printf("check sum = %zu\n", csum);
-}
 
 /* We have packets to send */
 static err_t lwip_eth_send(struct netif *netif, struct pbuf *p)
@@ -317,11 +317,8 @@ static err_t lwip_eth_send(struct netif *netif, struct pbuf *p)
 
     mark_buffer_used(buffer);
 
-    checksum(frame, copied);
     /* insert into the used tx queue */
-    ZF_LOGW("Enqueueing buffer into tx_used ring");
-
-    int error = ring_enqueue(state->tx_used, (void*)ENCODE_DMA_ADDRESS(frame), copied, buffer->index);
+    int error = ring_enqueue(state->tx_used, (void *)ENCODE_DMA_ADDRESS(frame), copied, buffer->index);
     if (error) {
         ZF_LOGF("lwip_eth_send: Error while enqueuing used buffer, tx used queue full");
         free_buffer(state, buffer);
@@ -348,9 +345,12 @@ static void tx_done(void *cookie)
         ethernet_buffer_t *buffer = &state->buffer_metadata[index];
 
         /* Little sanity check */
-        assert(buffer->dma_addr = encoded_addr);
+        if (buffer->dma_addr != encoded_addr) {
+            ZF_LOGE("buffer->dma_addr != encoded_addr, dma_addr = %p, encoded_addr = %p", buffer->dma_addr, encoded_addr);
+        }
 
         /* return buffer to unused queue. */
+        assert(buffer->allocated);
         buffer->allocated = false;
         mark_buffer_unused(state, buffer);
     }
@@ -413,7 +413,7 @@ static void client_init_tx(state_t *data, void *tx_available, void *tx_used, reg
         ethernet_buffer_t *buffer = &data->buffer_metadata[i + NUM_BUFFERS];
         *buffer = (ethernet_buffer_t) {
             .buffer = buf,
-            .dma_addr = ENCODE_DMA_ADDRESS(buf),
+            .dma_addr = (void *)ENCODE_DMA_ADDRESS(buf),
             .size = BUFFER_SIZE,
             .origin = ORIGIN_TX_QUEUE,
             .allocated = false,
@@ -459,7 +459,7 @@ static void client_init_rx(state_t *state, void *rx_available, void *rx_used, re
 
         *buffer = (ethernet_buffer_t) {
             .buffer = buf,
-            .dma_addr = ENCODE_DMA_ADDRESS(buf),
+            .dma_addr = (void *)ENCODE_DMA_ADDRESS(buf),
             .size = BUFFER_SIZE,
             .origin = ORIGIN_RX_QUEUE,
             .allocated = false,
