@@ -27,7 +27,6 @@ import <lwip-ethernet-async.camkes>;
     dataport ring_t tx_used; \
     consumes Notification rx_done; \
     emits Notification tx_ready; \
-    consumes Notification tx_done; \
     emits Init name##_init1; \
     consumes Init name##_init2;
 
@@ -40,7 +39,6 @@ import <lwip-ethernet-async.camkes>;
     dataport ring_t tx_avail; \
     dataport ring_t tx_used; \
     emits Notification rx_done; \
-    emits Notification tx_done; \
     consumes Notification tx_ready; \
     emits Init name##_init1; \
     consumes Init name##_init2;
@@ -53,7 +51,6 @@ import <lwip-ethernet-async.camkes>;
     connection seL4SharedData tx_used(from client.tx_used, to driver.tx_used); \
     connection seL4Notification tx_ready(from client.tx_ready, to driver.tx_ready); \
     connection seL4Notification rx_done(from driver.rx_done, to client.rx_done); \
-    connection seL4Notification tx_done(from driver.tx_done, to client.tx_done); \
     connection seL4DMASharedData name##_dma(from client.name##_dma_pool, to driver.name##_dma_pool); \
     connection LwipEthernetAsyncClientInit name##_client_init(from client.name##_init1, to client.name##_init2); \
     connection LwipEthernetAsyncServerInit name##_server_init(from driver.name##_init1, to driver.name##_init2);

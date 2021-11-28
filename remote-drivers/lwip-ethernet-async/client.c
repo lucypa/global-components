@@ -33,7 +33,7 @@
 #define LINK_SPEED 1000000000 // Gigabit
 #define ETHER_MTU 1500
 #define NUM_BUFFERS 512
-
+#define BUF_SIZE 2048
 /*
  * These structures track the buffers used to construct packets
  * sent via this network interface.
@@ -76,21 +76,14 @@ typedef struct state {
     ring_t *tx_avail;
     ring_t *tx_used;
 
-    notify_fn server_rx_notify;
     notify_fn server_tx_notify;
     /*
      * Metadata associated with buffers
      */
     ethernet_buffer_t buffer_metadata[NUM_BUFFERS * 2];
-    /*
-     * Free buffers for TX
-     */
-    ethernet_buffer_t *available_tx[NUM_BUFFERS];
-    size_t num_available_tx;
 } state_t;
 
 static register_cb_fn reg_rx_cb;
-static register_cb_fn reg_tx_cb;
 
 static inline int ring_enqueue(ring_t *ring, uintptr_t buffer, unsigned int len, unsigned int index)
 {
@@ -111,6 +104,10 @@ static inline int ring_enqueue(ring_t *ring, uintptr_t buffer, unsigned int len,
 /* Returns the index of the buffer in the state->metadata array. */
 static inline unsigned int ring_dequeue(ring_t *ring, uintptr_t *addr, unsigned int *len) 
 {
+    if (!(ring->write_idx - ring->read_idx % RING_SIZE)) {
+        ZF_LOGF("Ring is empty");
+    }
+
     unsigned int index = ring->buffers[ring->read_idx % RING_SIZE].idx;
     *addr = ring->buffers[ring->read_idx % RING_SIZE].encoded_addr;
     *len = ring->buffers[ring->read_idx % RING_SIZE].len;
@@ -126,37 +123,12 @@ static inline int ring_not_empty(ring_t *ring)
     return ((ring->write_idx - ring->read_idx) % RING_SIZE);
 }
 
-/* Allocate an empty TX buffer from the empty pool */
-static inline ethernet_buffer_t *alloc_tx_buffer(state_t *state, size_t length)
-{   
-    if (state->num_available_tx > 0) {
-        state->num_available_tx -= 1;
-        ethernet_buffer_t *buffer =  state->available_tx[state->num_available_tx];
-
-        if (buffer->size < length) {
-            /* Requested size too large */
-            state->num_available_tx += 1;
-            ZF_LOGE("Requested buffer size too large.");
-            return NULL;
-        } else {
-            buffer->allocated = true;
-            return buffer;
-        }
-    } else {
-        ZF_LOGF("No buffers left available");
-        return NULL;
-    }
-}
-
 /* Return a buffer to the appropriate queue */
 static inline void return_buffer(state_t *state, ethernet_buffer_t *buffer)
 {
     switch (buffer->origin) {
         case ORIGIN_TX_QUEUE:
-            ZF_LOGW("Returning TX buffer");
-            assert(state->num_available_tx < NUM_BUFFERS);
-            state->available_tx[state->num_available_tx] = buffer;
-            state->num_available_tx += 1;
+            ZF_LOGE("Why are we here?");
             break;
 
         case ORIGIN_RX_QUEUE: {
@@ -167,6 +139,38 @@ static inline void return_buffer(state_t *state, ethernet_buffer_t *buffer)
             break;
         }
     }
+}
+
+/* Allocate an empty TX buffer from the empty pool */
+static inline ethernet_buffer_t *alloc_tx_buffer(state_t *state, size_t length)
+{   
+    if (BUF_SIZE < length) {
+        ZF_LOGE("Requested buffer size too large.");
+        return NULL;
+    }
+
+    uintptr_t encoded_addr;
+    unsigned int len;
+
+    unsigned int index = ring_dequeue(state->tx_avail, &encoded_addr, &len);
+    ZF_LOGW("index = %d", index);
+
+    ethernet_buffer_t *buffer = &state->buffer_metadata[index];
+
+    /* Little sanity check */
+    if (buffer->dma_addr != encoded_addr) {
+        ZF_LOGE("buffer->dma_addr != encoded_addr, dma_addr = %p, encoded_addr = %p", buffer->dma_addr, encoded_addr);
+    }
+
+    if (!buffer->allocated) {
+        buffer->allocated = true;
+    } 
+    if (buffer->in_async_use) {
+        /* buffers are no longer in use if they are in the tx_avail ring! */
+        buffer->in_async_use = false;
+    }
+
+    return buffer;
 }
 
 static inline void free_buffer(state_t *data, ethernet_buffer_t *buffer)
@@ -333,37 +337,6 @@ static err_t lwip_eth_send(struct netif *netif, struct pbuf *p)
     return ret;
 }
 
-/* Packets have been sent. We can reuse their buffers. */
-static void tx_done(void *cookie)
-{
-    trace_extra_point_start(1);
-    state_t *state = cookie;
-
-    while(ring_not_empty(state->tx_avail)) {
-        ZF_LOGW("returning buffer");
-        uintptr_t encoded_addr;
-        unsigned int len;
-
-        int index = ring_dequeue(state->tx_avail, &encoded_addr, &len);
-        ethernet_buffer_t *buffer = &state->buffer_metadata[index];
-
-        /* Little sanity check */
-        if (buffer->dma_addr != encoded_addr) {
-            ZF_LOGE("buffer->dma_addr != encoded_addr, dma_addr = %p, encoded_addr = %p", buffer->dma_addr, encoded_addr);
-        }
-
-        /* return buffer to unused queue. */
-        assert(buffer->allocated);
-        buffer->allocated = false;
-        mark_buffer_unused(state, buffer);
-    }
-
-    /* re register the notification callback. */
-    int error = reg_tx_cb(tx_done, state);
-    ZF_LOGF_IF(error, "Unable to register handler");
-    trace_extra_point_end(1, 1);
-}
-
 static err_t ethernet_init(struct netif *netif)
 {
     if (netif->state == NULL) {
@@ -389,15 +362,8 @@ static err_t ethernet_init(struct netif *netif)
     return ERR_OK;
 }
 
-static void client_init_tx(state_t *data, void *tx_available, void *tx_used, register_cb_fn reg_tx)
+static void client_init_tx(state_t *data, void *tx_available, void *tx_used)
 {
-    int error = reg_tx(tx_done, data);
-    if (error) {
-        ZF_LOGE("Unable to register handler");
-    }
-
-    reg_tx_cb = reg_tx;
-
     data->tx_avail = (ring_t *)tx_available;
     data->tx_used = (ring_t *)tx_used;
 
@@ -425,8 +391,7 @@ static void client_init_tx(state_t *data, void *tx_available, void *tx_used, reg
             .index = i + NUM_BUFFERS,
         };
 
-        data->available_tx[data->num_available_tx] = buffer;
-        data->num_available_tx++;
+        ring_enqueue(data->tx_avail, buffer->dma_addr, BUFFER_SIZE, i + NUM_BUFFERS);
     }
 }
 
@@ -478,8 +443,7 @@ static void client_init_rx(state_t *state, void *rx_available, void *rx_used, re
 
 int lwip_ethernet_async_client_init(ps_io_ops_t *io_ops, get_mac_client_fn_t get_mac, void **cookie, 
                 void *rx_available, void *rx_used, void *tx_available, void *tx_used, 
-                register_cb_fn reg_rx_cb, register_cb_fn reg_tx_cb, 
-                notify_fn rx_notify, notify_fn tx_notify)
+                register_cb_fn reg_rx_cb, notify_fn tx_notify)
 {
     state_t *data;
     int error = ps_calloc(
@@ -491,16 +455,13 @@ int lwip_ethernet_async_client_init(ps_io_ops_t *io_ops, get_mac_client_fn_t get
     ZF_LOGF_IF(error != 0, "Unable to ethernet state");
     data->io_ops = io_ops;
 
-    data->server_rx_notify = rx_notify;
     data->server_tx_notify = tx_notify;
 
     client_init_rx(data, rx_available, rx_used, reg_rx_cb);
-    client_init_tx(data, tx_available, tx_used, reg_tx_cb);
+    client_init_tx(data, tx_available, tx_used);
 
     error = trace_extra_point_register_name(0, "rx_queue ntfn");
     ZF_LOGF_IF(error, "Failed to register extra trace point 0");
-    error = trace_extra_point_register_name(1, "tx_done ntfn");
-    ZF_LOGF_IF(error, "Failed to register extra trace point 1");
 
     LWIP_MEMPOOL_INIT(RX_POOL);
 

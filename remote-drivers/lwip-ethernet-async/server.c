@@ -50,7 +50,6 @@ typedef struct data {
     ring_t *tx_used;
 
     notify_fn client_rx_notify;
-    notify_fn client_tx_notify;
 } server_data_t;
 
 static register_cb_fn reg_tx_cb;
@@ -111,8 +110,6 @@ static void eth_tx_complete(void *iface, void *cookie)
     int err = ring_enqueue(state->tx_avail, desc->encoded_addr, desc->len, desc->idx);
     ZF_LOGF_IF(err, "lwip_eth_send: Error while enqueuing available buffer, tx available queue full");
 
-    /* notify client */
-    state->client_tx_notify();
     trace_extra_point_end(1, 1);
 }
 
@@ -166,6 +163,7 @@ static void eth_rx_complete(void *iface, unsigned int num_bufs, void **cookies, 
     }
 
     /* Notify the client */
+    // TODO: why isn't this being batched? 
     state->client_rx_notify();
     trace_extra_point_end(0, 1);
 }
@@ -237,30 +235,27 @@ static void server_init_tx(server_data_t *state, void *tx_available, void *tx_us
     reg_tx_cb = reg_tx;
 }
 
-static void server_init_rx(server_data_t *state, void *rx_available, void *rx_used, register_cb_fn reg_rx)
+static void server_init_rx(server_data_t *state, void *rx_available, void *rx_used)
 {
     state->rx_avail = (ring_t *)rx_available;
     state->rx_used = (ring_t *)rx_used;
    
     // TODO: set up notification channel from client to server when rx_queue is empty. 
-
 }
 
 int lwip_ethernet_async_server_init(ps_io_ops_t *io_ops, register_get_mac_server_fn register_get_mac_fn,
-                void *rx_available, void *rx_used, void *tx_available, void *tx_used, 
-                register_cb_fn reg_rx_cb, register_cb_fn reg_tx_cb, 
-                notify_fn rx_notify, notify_fn tx_notify)
+                void *rx_available, void *rx_used, void *tx_available, void *tx_used, register_cb_fn reg_tx_cb, 
+                notify_fn rx_notify)
 {
     server_data_t *data;
     int error = ps_calloc(&io_ops->malloc_ops, 1, sizeof(*data), (void **)&data);
     ZF_LOGF_IF(error, "Failed to calloc server data");
     data->io_ops = io_ops;
 
-    server_init_rx(data, rx_available, rx_used, reg_rx_cb);
+    server_init_rx(data, rx_available, rx_used);
     server_init_tx(data, tx_available, tx_used, reg_tx_cb);
 
     data->client_rx_notify = rx_notify;
-    data->client_tx_notify = tx_notify;
 
     error = ps_interface_find(&io_ops->interface_registration_ops,
                               PS_ETHERNET_INTERFACE, hardware_interface_searcher, data);
