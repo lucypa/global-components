@@ -20,7 +20,7 @@ static int init_client_pre(ps_io_ops_t *io_ops) {
 
     return lwip_ethernet_async_client_init(io_ops, /*? connection_name ?*/_control_mac, 
                     &instance_cookie, rx_avail, rx_used, tx_avail, tx_used, 
-                    rx_done_reg_callback, tx_done_reg_callback, NULL, tx_ready_emit);
+                    rx_done_reg_callback, tx_ready_emit);
 }
 
 CAMKES_PRE_INIT_MODULE_DEFINE(/*? connection_name ?*/_client_setup_pre, init_client_pre);
