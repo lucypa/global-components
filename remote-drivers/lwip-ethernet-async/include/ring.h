@@ -31,6 +31,8 @@ typedef struct ring {
     uint32_t read_idx;
 } ring_t;
 
+seL4_Word tx_badge;
+seL4_Word rx_badge;
 
 /* the reader always and only  modifies the read index, the writer the write index.  
 Reads/writes of a small integer are atomic.

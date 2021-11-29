@@ -368,7 +368,6 @@ static void client_init_tx(state_t *data, void *tx_available, void *tx_used)
     data->tx_used = (ring_t *)tx_used;
 
     /* Allocate tx rings */
-    data->num_available_tx = 0;
     for (int i = 0; i < NUM_BUFFERS - 1; i++) {
         void *buf = ps_dma_alloc(
             &data->io_ops->dma_manager,
