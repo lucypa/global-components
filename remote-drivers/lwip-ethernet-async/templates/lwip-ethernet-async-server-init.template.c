@@ -39,7 +39,6 @@ void /*? configuration[me.parent.name].get('connection_name') ?*/_control_mac(ui
 }
 
 static int init_server(ps_io_ops_t *io_ops) {
-
     return lwip_ethernet_async_server_init(io_ops, register_get_mac_fn, 
                 rx_avail, rx_used, tx_avail, tx_used, tx_ready_reg_callback, rx_done_emit);
 }

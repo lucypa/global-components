@@ -41,16 +41,13 @@ DeclareCAmkESConnector(
 add_library(lwip-ethernet-async INTERFACE)
 target_include_directories(lwip-ethernet-async INTERFACE include)
 
-# Interface library for the dataports
-add_library(ring INTERFACE)
-target_include_directories(ring INTERFACE include)
-
-add_library(lwip-ethernet-async-server EXCLUDE_FROM_ALL server.c )
+add_library(lwip-ethernet-async-server EXCLUDE_FROM_ALL server.c)
 target_link_libraries(
     lwip-ethernet-async-server
     sel4camkes
     lwip-ethernet-async
     ethdrivers
+    shared_ringbuffer
     LWIPServer-client
 )
 
@@ -60,5 +57,6 @@ target_link_libraries(
     sel4camkes
     lwip-ethernet-async
     lwip
+    shared_ringbuffer
     LWIPServer-client
 )
