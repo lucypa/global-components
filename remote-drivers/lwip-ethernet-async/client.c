@@ -105,7 +105,7 @@ static inline ethernet_buffer_t *alloc_tx_buffer(state_t *state, size_t length)
     }
 
     uintptr_t encoded_addr;
-    unsigned int len;
+    size_t len;
     ethernet_buffer_t *buffer;
 
     int err = dequeue_avail(state->tx_ring, &encoded_addr, &len, (void **)&buffer);
@@ -192,7 +192,7 @@ static void rx_queue(void *cookie)
     /* get buffers from used RX ring */
     while(!ring_empty(state->rx_ring->used_ring)) {
         uintptr_t encoded_addr;
-        unsigned int len;
+        size_t len;
         ethernet_buffer_t *buffer;
 
         dequeue_used(state->rx_ring, &encoded_addr, &len, (void **)&buffer);

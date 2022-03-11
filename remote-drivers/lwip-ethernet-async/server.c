@@ -91,7 +91,7 @@ static uintptr_t eth_allocate_rx_buf(void *iface, size_t buf_size, void **cookie
     server_data_t *state = iface;
 
     uintptr_t addr;
-    unsigned int len;
+    size_t len;
 
     /* Try to grab a buffer from the available ring */
     if (driver_dequeue(state->rx_ring->avail_ring, &addr, &len, cookie)) {
@@ -129,7 +129,7 @@ static void eth_rx_complete(void *iface, unsigned int num_bufs, void **cookies, 
     for (int i = 0; i < num_bufs; i++) {
         /* Add buffers to used rx ring. */
         buff_desc_t *desc = cookies[i];
-        int err = enqueue_used(state->rx_ring, desc->encoded_addr, lens[i], desc->cookie);
+        int err = enqueue_used(state->rx_ring, desc->encoded_addr, (size_t)lens[i], desc->cookie);
     }
 
     /* Notify the client */
@@ -157,7 +157,7 @@ static void tx_send(void *iface)
     server_data_t *state = iface;
 
     uintptr_t buffer;
-    unsigned int len;
+    size_t len;
     void *cookie;
 
     while(!driver_dequeue(state->tx_ring->used_ring, &buffer, &len, &cookie)) {
@@ -291,8 +291,6 @@ int lwip_ethernet_async_server_init(ps_io_ops_t *io_ops, register_get_mac_server
     ZF_LOGF_IF(error, "Failed to register extra trace point 1");
     error = trace_extra_point_register_name(2, "tx_send ntfn");
     ZF_LOGF_IF(error, "Failed to register extra trace point 2");
-    error = trace_extra_point_register_name(3, "rx_empty ntfn");
-    ZF_LOGF_IF(error, "Failed to register extra trace point 3");
 
     data->eth_driver->i_fn.get_mac(data->eth_driver, data->hw_mac);
     data->eth_driver->i_fn.raw_poll(data->eth_driver);
